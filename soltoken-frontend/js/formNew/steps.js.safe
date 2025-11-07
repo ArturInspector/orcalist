@@ -1,0 +1,442 @@
+// steps.js — полная исправленная версия
+
+// ---------- state ----------
+let formData = {
+  tokenName: '',
+  tokenSymbol: '',
+  tokenLogo: null,
+  decimals: '',
+  supply: '',
+  description: '',
+  website: '',
+  twitter: '',
+  telegram: '',
+  discord: '',
+  creatorName: '',
+  creatorWebsite: '',
+  totalCost: 0,
+  modifications: {
+    modifyCreator: false,
+    revokeFreeze: false,
+    revokeMint: false,
+    revokeUpdate: false,
+  }
+};
+
+// Один источник правды для RPC: используем тот же кластер, что и бэкенд (сейчас devnet)
+const RPC = "https://api.devnet.solana.com";
+
+// ---------- helpers ----------
+function b64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function shortenAddress(address) {
+  return `${address.slice(0, 5)}...${address.slice(-5)}`;
+}
+
+function updateCost() {
+  let totalCost = 0.2;
+  const modificationCost = 0.1;
+
+  if (formData.modifications.modifyCreator) totalCost += modificationCost;
+  if (formData.modifications.revokeFreeze) totalCost += modificationCost;
+  if (formData.modifications.revokeMint) totalCost += modificationCost;
+  if (formData.modifications.revokeUpdate) totalCost += modificationCost;
+
+  document.querySelectorAll('.selector__btn.selected').forEach(button => {
+    const costText = button.closest('.selector').querySelector('.selector__cost').textContent;
+    const cost = parseFloat(costText.replace('+', '').replace(' SOL', '').trim());
+    totalCost += cost;
+  });
+
+  formData.totalCost = totalCost;
+
+  const costElement = document.querySelector('.make__cost');
+  costElement.textContent = `Cost: ${totalCost.toFixed(1)} SOL`;
+  costElement.style.display = totalCost > 0 ? 'flex' : 'none';
+}
+
+// ---------- step 1: upload image & basic fields ----------
+document.getElementById('manipulationBtn').addEventListener('click', async function () {
+  const tokenName = document.getElementById('tokenName').value;
+  const tokenSymbol = document.getElementById('tokenSymbol').value;
+  const errorFieldsStepOne = document.getElementById('errorFieldsStepOne');
+  const fileInput = document.getElementById('tokenLogo');
+  const file = fileInput.files[0];
+
+  if (!tokenName || !tokenSymbol || !file) {
+    errorFieldsStepOne.classList.add('active');
+    setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+    return;
+  }
+
+  const validImageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/jpg'];
+  const maxSizeInBytes = 5 * 1024 * 1024;
+
+  if (!validImageTypes.includes(file.type) || file.size > maxSizeInBytes) {
+    errorFieldsStepOne.classList.add('active');
+    setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+    return;
+  }
+
+  try {
+    const formDataURL = new FormData();
+    formDataURL.append("file", file);
+    formDataURL.append("network", "public");
+
+    // твой ключ как был
+    const apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI4OTRkYzBjYi00MTJiLTQ3YzItYmRlNi0yZTJkMjQyMDNjZTkiLCJlbWFpbCI6Inl1bmdwaWRyc0B0dXRhbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwicGluX3BvbGljeSI6eyJyZWdpb25zIjpbeyJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MSwiaWQiOiJGUkExIn0seyJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MSwiaWQiOiJOWUMxIn1dLCJ2ZXJzaW9uIjoxfSwibWZhX2VuYWJsZWQiOmZhbHNlLCJzdGF0dXMiOiJBQ1RJVkUifSwiYXV0aGVudGljYXRpb25UeXBlIjoic2NvcGVkS2V5Iiwic2NvcGVkS2V5S2V5IjoiNDViYTUwNWM3ZDBlNmRiYjc4NGQiLCJzY29wZWRLZXlTZWNyZXQiOiJlNDE2YjFiNjQxZTc0ZmUwMTQyM2ZhYjVlNDFjZDlmMGU1OGNlNWQ0N2Q4OTA3YWNiZmU1Njk4ZWRlNDYzMzQ5IiwiZXhwIjoxNzkwMzU2Njg0fQ.5O5Xzd0FNsQyBQm74poQLVjalVc-QczW7iHwG3eQr7o';
+
+    const response = await fetch("https://uploads.pinata.cloud/v3/files", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formDataURL,
+    });
+
+    const responseData = await response.json();
+
+    if (response.ok) {
+      const ipfsUrl = `https://amethyst-persistent-albatross-280.mypinata.cloud/ipfs/${responseData.data.cid}`;
+      formData.tokenName = tokenName;
+      formData.tokenSymbol = tokenSymbol;
+      formData.tokenLogo = ipfsUrl;
+
+      errorFieldsStepOne.classList.remove('active');
+      document.getElementById('stepOne').style.display = 'none';
+      document.getElementById('stepTwo').style.display = 'block';
+      document.getElementById('stepNumOne').classList.remove('make__step--active');
+      document.getElementById('stepNumTwo').classList.add('make__step--active');
+      document.getElementById('manipulationBtn').style.display = 'none';
+      document.getElementById('nextStepTwoBtn').style.display = 'block';
+    } else {
+      errorFieldsStepOne.classList.add('active');
+      errorFieldsStepOne.textContent = 'Error upload image on IPFS.';
+      setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+    }
+  } catch (error) {
+    const errorFieldsStepOne = document.getElementById('errorFieldsStepOne');
+    errorFieldsStepOne.classList.add('active');
+    errorFieldsStepOne.textContent = 'Error upload image on IPFS.';
+    setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+  }
+});
+
+// выбрать файл
+document.querySelector('.make__select').addEventListener('click', function () {
+  const fileInput = document.getElementById('tokenLogo');
+  fileInput.value = '';
+  fileInput.click();
+});
+
+document.getElementById('tokenLogo').addEventListener('change', function () {
+  const file = this.files[0];
+  const validImageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif'];
+  const maxSizeInBytes = 5 * 1024 * 1024;
+
+  if (file) {
+    if (validImageTypes.includes(file.type) && file.size <= maxSizeInBytes) {
+      document.querySelector('.make__select-text').textContent = file.name;
+    } else {
+      const errorFieldsStepOne = document.getElementById('errorFieldsStepOne');
+      errorFieldsStepOne.classList.add('active');
+      errorFieldsStepOne.textContent = 'Invalid file. Please select a PNG, JPG, or GIF image under 5MB.';
+      setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+    }
+  } else {
+    const errorFieldsStepOne = document.getElementById('errorFieldsStepOne');
+    errorFieldsStepOne.classList.add('active');
+    setTimeout(() => errorFieldsStepOne.classList.remove('active'), 2500);
+  }
+});
+
+// ---------- step 2 ----------
+document.getElementById('nextStepTwoBtn').addEventListener('click', function () {
+  const decimals = document.getElementById('decimals').value;
+  const supply = document.getElementById('supply').value;
+  const description = document.getElementById('description').value;
+  const errorFieldsStepTwo = document.getElementById('errorFieldsStepTwo');
+
+  if (!decimals || !supply || !description) {
+    errorFieldsStepTwo.classList.add('active');
+    setTimeout(() => errorFieldsStepTwo.classList.remove('active'), 2500);
+    return;
+  }
+
+  formData.decimals = decimals;
+  formData.supply = supply;
+  formData.description = description;
+
+  errorFieldsStepTwo.classList.remove('active');
+  document.getElementById('stepTwo').style.display = 'none';
+  document.getElementById('stepThree').style.display = 'block';
+  document.getElementById('stepNumTwo').classList.remove('make__step--active');
+  document.getElementById('stepNumThree').classList.add('make__step--active');
+  document.getElementById('nextStepTwoBtn').style.display = 'none';
+  document.getElementById('stepThreeData').style.display = 'flex';
+});
+
+// ---------- selectors / cost ----------
+document.querySelectorAll('.selector__btn').forEach(button => {
+  button.addEventListener('click', function () {
+    const selectType = this.getAttribute('data-btn');
+    formData.modifications[selectType] = !formData.modifications[selectType];
+    this.textContent = formData.modifications[selectType] ? 'Selected' : 'Select to Revoke';
+    this.classList.toggle('selected', formData.modifications[selectType]);
+    this.blur();
+    updateCost();
+  });
+});
+
+// ---------- create token ----------
+document.getElementById('createTokenBtn').addEventListener('click', async function () {
+  const createTokenBtn = document.getElementById('createTokenBtn');
+  const errorFieldsStepThree = document.getElementById('errorFieldsStepThree');
+  const loadInfo = document.querySelector('.load__info');
+  const modalSuccess = document.getElementById('modalSuccess');
+  const storedWallet = sessionStorage.getItem("walletAddress");
+  const walletProvider = sessionStorage.getItem("walletProvider");
+
+  // базовая валидация включена выше; здесь только процесс
+  createTokenBtn.setAttribute('tabindex', '-1');
+  createTokenBtn.disabled = true;
+  loadInfo.style.display = 'flex';
+  loadInfo.textContent = 'Preparing transaction...';
+
+  try {
+    // 1) запрашиваем подготовленную транзу у бэка
+    const response = await fetch('/api/proceed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wallet: storedWallet,
+        decimals: Number(formData.decimals),
+        name: formData.tokenName,
+        symbol: formData.tokenSymbol,
+        description: formData.description,
+        metadata_uri: formData.tokenLogo,   // важно: бэку нужен metadata_uri, не pic
+        priority_fee: 250000,
+        use_token_2022: true
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data || !data.success || !data.tx) {
+      createTokenBtn.disabled = false;
+      loadInfo.textContent = (data && (data.detail || data.message)) ? (data.detail || data.message) : 'Backend error';
+      return;
+    }
+
+    // 2) парсим одну транзу
+    const raw = b64ToUint8Array(data.tx);
+    let tx;
+    try {
+      tx = solanaWeb3.Transaction.from(raw);
+    } catch (e) {
+      console.error('Transaction.from failed:', e);
+      createTokenBtn.disabled = false;
+      loadInfo.textContent = 'Failed to parse transaction';
+      return;
+    }
+
+    // 3) коннект к тому же RPC
+    const connection = new solanaWeb3.Connection(RPC, "confirmed");
+
+    // 4) подписываем одной из поддерживаемых wallet
+    let signedTx;
+    try {
+      if (walletProvider === 'phantom') {
+        if (!window.solana?.isPhantom) await window.solana.connect();
+        signedTx = await window.solana.signTransaction(tx);
+      } else if (walletProvider === 'solflare') {
+        if (!window.solflare?.isSolflare) {
+          loadInfo.textContent = 'Solflare not found';
+          createTokenBtn.disabled = false;
+          return;
+        }
+        try { await window.solflare.connect(); } catch (_) {}
+        signedTx = await window.solflare.signTransaction(tx);
+      } else {
+        loadInfo.textContent = 'Unsupported wallet';
+        createTokenBtn.disabled = false;
+        return;
+      }
+    } catch (e) {
+      console.error('signTransaction error:', e);
+      createTokenBtn.disabled = false;
+      loadInfo.textContent = 'Error signing transaction';
+      return;
+    }
+
+    // 5) отправляем и подтверждаем
+    loadInfo.textContent = 'Sending transaction...';
+    try {
+      const sig = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction(sig, "confirmed");
+    } catch (e) {
+      console.error('send/confirm error:', e);
+      createTokenBtn.disabled = false;
+      loadInfo.textContent = 'RPC send error';
+      return;
+    }
+
+    // 6) успех — показываем модалку и ссылки
+    sessionStorage.setItem('token', data.mint || data.token || '');
+
+    document.getElementById('explorerLink').href = `https://explorer.solana.com/address/${data.mint || data.token}?cluster=devnet`;
+    document.getElementById('solcanLink').href   = `https://solscan.io/token/${data.mint || data.token}?cluster=devnet`;
+    document.getElementById('modalAddressWallet').textContent = shortenAddress(data.mint || data.token);
+
+    loadInfo.style.display = 'none';
+    modalSuccess.classList.add('active');
+    document.body.classList.add('active');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    document.querySelector('.wrapper').style.overflow = 'hidden';
+
+    createTokenBtn.disabled = false;
+    createTokenBtn.removeAttribute('tabindex');
+  } catch (error) {
+    console.error(error);
+    createTokenBtn.disabled = false;
+    loadInfo.textContent = 'Unexpected error';
+  }
+});
+
+// ---------- modal copy ----------
+document.getElementById('modalCopyAddress').addEventListener('click', function () {
+  let addressText = document.getElementById('modalAddressWallet');
+  const tempInput = document.createElement('input');
+  document.body.appendChild(tempInput);
+  tempInput.value = sessionStorage.getItem('token');
+  tempInput.select();
+  document.execCommand('copy');
+  document.body.removeChild(tempInput);
+  addressText.textContent = "Copied!";
+  this.disabled = true;
+
+  setTimeout(() => {
+    addressText.textContent = sessionStorage.getItem('token');
+    this.disabled = false;
+  }, 1500);
+});
+
+document.getElementById('modalSuccessClose').addEventListener('click', function () {
+  const modalSuccess = document.getElementById('modalSuccess');
+  modalSuccess.classList.remove('active');
+  document.documentElement.style.overflow = '';
+  document.body.style.overflow = '';
+  document.querySelector('.wrapper').style.overflow = '';
+  document.body.classList.remove('active');
+});
+
+// ---------- pool UI toggles ----------
+document.getElementById("createLiquidityPool").addEventListener("click", function () {
+  const solValueInput = document.getElementById("solValue");
+  const createPoolButton = document.getElementById("createPool");
+  const tokenAmountPool = document.getElementById("tokenAmountPool");
+
+  const show = (solValueInput.style.display !== "block");
+  solValueInput.style.display = show ? "block" : "none";
+  createPoolButton.style.display = show ? "block" : "none";
+  tokenAmountPool.style.display = show ? "block" : "none";
+});
+
+// ---------- create pool (пока одна транза, как на бэке) ----------
+document.getElementById("createPool").addEventListener("click", async () => {
+  const solValue = document.getElementById('solValue');
+  const tokenAmountPool = document.getElementById('tokenAmountPool');
+  const modalTitle = document.getElementById('tokenTitleModal');
+  const storedWallet = sessionStorage.getItem("walletAddress");
+  const walletProvider = sessionStorage.getItem("walletProvider");
+
+  if (isNaN(solValue.value) || solValue.value === "") {
+    solValue.style.border = "2px solid red";
+    return;
+  } else {
+    solValue.style.border = "";
+  }
+
+  if (isNaN(tokenAmountPool.value) || tokenAmountPool.value === "") {
+    tokenAmountPool.style.border = "2px solid red";
+    return;
+  } else {
+    if (Number(tokenAmountPool.value) >= Number(formData.supply)) {
+      tokenAmountPool.style.border = "2px solid red";
+      return;
+    }
+    tokenAmountPool.style.border = "";
+  }
+
+  try {
+    // высылаем только то, что бэк реально принимает (wallet/amount/priority_fee)
+    const resp = await fetch('/api/listing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wallet: storedWallet,
+        amount: parseFloat(solValue.value),
+        priority_fee: 250000
+      })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok || !data || !data.success || !data.tx) {
+      tokenAmountPool.style.border = "2px solid red";
+      solValue.style.border = "2px solid red";
+      return;
+    }
+
+    const raw = b64ToUint8Array(data.tx);
+    let tx;
+    try {
+      tx = solanaWeb3.Transaction.from(raw);
+    } catch (e) {
+      console.error('Transaction.from failed:', e);
+      tokenAmountPool.style.border = "2px solid red";
+      solValue.style.border = "2px solid red";
+      return;
+    }
+
+    const connection = new solanaWeb3.Connection(RPC, "confirmed");
+
+    let signedTx;
+    if (walletProvider === 'phantom') {
+      if (!window.solana?.isPhantom) await window.solana.connect();
+      signedTx = await window.solana.signTransaction(tx);
+    } else if (walletProvider === 'solflare') {
+      if (!window.solflare?.isSolflare) {
+        console.error('Solflare not found');
+        return;
+      }
+      try { await window.solflare.connect(); } catch (_) {}
+      signedTx = await window.solflare.signTransaction(tx);
+    } else {
+      console.error('Unsupported wallet');
+      return;
+    }
+
+    try {
+      const sig = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction(sig, "confirmed");
+    } catch (err) {
+      console.error(err);
+      tokenAmountPool.style.border = "2px solid red";
+      solValue.style.border = "2px solid red";
+      return;
+    }
+
+    modalTitle.textContent = 'Liquidity pool successfully filled!';
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+// ---- init ----
+updateCost();
+

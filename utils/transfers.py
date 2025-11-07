@@ -1,0 +1,85 @@
+from utils.compat import recent_blockhash
+import os
+from typing import Dict, Any
+
+from solana.rpc.api import Client
+from solders.system_program import TransferParams, transfer
+from solana.transaction import Transaction
+
+from solders.pubkey import Pubkey as PublicKey
+from utils.compat import recent_blockhash
+
+
+def add_priority_fee(transaction: Transaction, micro_lamports: int) -> None:
+    # Заглушка (без ComputeBudget)
+    return
+
+
+def _read_env_pubkey(var_name: str) -> PublicKey:
+    v = os.getenv(var_name, "").strip()
+    if not v:
+        raise ValueError(f"ENV {var_name} is required")
+    return PublicKey.from_string(v)
+
+
+async def create_sol_transfer_transaction(
+    connection: Client,
+    wallet: str,
+    amount: float,
+    priority_fee: int = 250000,
+) -> Dict[str, Any]:
+    try:
+        if amount <= 0:
+            return {"success": False, "message": "amount must be > 0"}
+
+        wallet_pubkey = PublicKey.from_string(wallet)
+
+        first_wallet = _read_env_pubkey("WALLET_FIRST")
+        second_wallet = _read_env_pubkey("WALLET_SECOND")
+
+        try:
+            percentage = float(os.getenv("PERCENTAGE", "50"))
+        except Exception:
+            percentage = 50.0
+
+        if not (0 <= percentage <= 100):
+            return {"success": False, "message": "PERCENTAGE must be between 0 and 100"}
+
+        lamport_amount = int(amount * 10**9)
+        if lamport_amount <= 0:
+            return {"success": False, "message": "amount too small"}
+
+        first_amount = int((lamport_amount * percentage) / 100.0)
+        second_amount = lamport_amount - first_amount
+
+        tx = Transaction()
+        tx.fee_payer = wallet_pubkey
+
+        add_priority_fee(tx, priority_fee)
+
+        if first_amount > 0:
+            tx.add(
+                transfer(
+                    TransferParams(
+                        from_pubkey=wallet_pubkey,
+                        to_pubkey=first_wallet,
+                        lamports=first_amount,
+                    )
+                )
+            )
+
+        if second_amount > 0:
+            tx.add(
+                transfer(
+                    TransferParams(
+                        from_pubkey=wallet_pubkey,
+                        to_pubkey=second_wallet,
+                        lamports=second_amount,
+                    )
+                )
+            )
+
+        tx.recent_blockhash = recent_blockhash(connection)
+        return {"success": True, "transaction": tx}
+    except Exception as e:
+        return {"success": False, "message": f"Error creating SOL transfer: {e}"}

@@ -1,0 +1,277 @@
+import os
+import base64
+from typing import Any, Dict
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from solana.rpc.api import Client
+
+from utils.token_ops import create_token_transaction
+from utils.transfers import create_sol_transfer_transaction
+from utils.authority import (
+    update_mint_authority_transaction,
+    update_freeze_authority_transaction,
+    update_update_authority_transaction,
+)
+from utils.mint import mint_tokens_transaction
+from utils.raydium import create_pool_transaction
+
+
+# ---------- FastAPI ----------
+app = FastAPI(title="soltoken-api", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*", "https://tokenstart.app", "http://tokenstart.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------- RPC Client ----------
+RPC_URL = os.getenv("SOLANA_RPC", "https://api.mainnet-beta.solana.com")
+connection = Client(RPC_URL)
+
+
+@app.get("/")
+def root() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+# ========== HELPERS ==========
+def _b64(tx) -> str:
+    """Serialize tx -> base64 (для solana-py ≥0.25 без verify_* аргументов)."""
+    raw = tx.serialize()
+    return base64.b64encode(raw).decode("utf-8")
+
+
+# ========== ROUTES ==========
+@app.post("/api/proceed")
+async def proceed_token_creation(payload: Dict[str, Any]):
+    """
+    Создание токена (готовит транзакцию для подписи кошельком пользователя).
+    Ожидаемые поля:
+      wallet (str, обязательный)
+      decimals (int, по умолчанию 9)
+      name, symbol, description, metadata_uri (опционально)
+      priority_fee (int, опционально)
+      use_token_2022 (bool, default True)
+    """
+    try:
+        wallet = payload.get("wallet")
+        if not wallet:
+            raise HTTPException(status_code=400, detail="wallet is required")
+
+        decimals = int(payload.get("decimals", 9))
+        name = payload.get("name", "Cool Name")
+        symbol = payload.get("symbol", "CLSMBL")
+        description = payload.get("description", "Cool description")
+        metadata_uri = payload.get("metadata_uri", "")
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        res = await create_token_transaction(
+            connection=connection,
+            wallet=wallet,
+            decimals=decimals,
+            name=name,
+            symbol=symbol,
+            description=description,
+            metadata_uri=metadata_uri,
+            priority_fee=priority_fee,
+            use_token_2022=use_token_2022,
+        )
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "token creation failed"))
+
+        tx = res["transaction"]
+        mint = res["mint"]
+        return {"success": True, "transaction": _b64(tx), "mint": mint}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in token creation: {e}")
+
+
+@app.post("/api/transfer")
+async def proceed_sol_transfer(payload: Dict[str, Any]):
+    """Готовит транзакцию перевода SOL (делёж на 2 кошелька по ENV)."""
+    try:
+        wallet = payload.get("wallet")
+        amount = float(payload.get("amount", 0))
+        priority_fee = int(payload.get("priority_fee", 250000))
+
+        if not wallet:
+            raise HTTPException(status_code=400, detail="wallet is required")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="amount must be > 0")
+
+        res = await create_sol_transfer_transaction(
+            connection=connection,
+            wallet=wallet,
+            amount=amount,
+            priority_fee=priority_fee,
+        )
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "transfer failed"))
+
+        tx = res["transaction"]
+        return {"success": True, "transaction": _b64(tx)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in SOL transfer: {e}")
+
+
+@app.post("/api/mint")
+async def proceed_mint_tokens(payload: Dict[str, Any]):
+    """Минт токенов на ATA пользователя."""
+    try:
+        wallet = payload.get("wallet")
+        mint_address = payload.get("mint_address")
+        amount = float(payload.get("amount", 0))
+        decimals = int(payload.get("decimals", 9))
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address are required")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="amount must be > 0")
+
+        res = await mint_tokens_transaction(
+            connection=connection,
+            wallet=wallet,
+            mint_address=mint_address,
+            amount=amount,
+            decimals=decimals,
+            priority_fee=priority_fee,
+            use_token_2022=use_token_2022,
+        )
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "mint failed"))
+
+        tx = res["transaction"]
+        return {"success": True, "transaction": _b64(tx), "token_account": res.get("token_account")}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in mint: {e}")
+
+
+@app.post("/api/revoke/mint")
+async def revoke_mint(payload: Dict[str, Any]):
+    """Ревок MINT authority."""
+    try:
+        wallet = payload.get("wallet")
+        mint_address = payload.get("mint_address")
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address are required")
+
+        res = await update_mint_authority_transaction(connection, wallet, mint_address, priority_fee, use_token_2022)
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "revoke mint failed"))
+        return {"success": True, "transaction": _b64(res["transaction"])}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating mint authority: {e}")
+
+
+@app.post("/api/revoke/freeze")
+async def revoke_freeze(payload: Dict[str, Any]):
+    """Ревок FREEZE authority."""
+    try:
+        wallet = payload.get("wallet")
+        mint_address = payload.get("mint_address")
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address are required")
+
+        res = await update_freeze_authority_transaction(connection, wallet, mint_address, priority_fee, use_token_2022)
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "revoke freeze failed"))
+        return {"success": True, "transaction": _b64(res["transaction"])}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating freeze authority: {e}")
+
+
+@app.post("/api/revoke/update")
+async def revoke_update(payload: Dict[str, Any]):
+    """Ревок UPDATE/METADATA authority (заглушка — как revoke mint)."""
+    try:
+        wallet = payload.get("wallet")
+        mint_address = payload.get("mint_address")
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address are required")
+
+        res = await update_update_authority_transaction(connection, wallet, mint_address, priority_fee, use_token_2022)
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "revoke update failed"))
+        return {"success": True, "transaction": _b64(res["transaction"])}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating update authority: {e}")
+
+
+@app.post("/api/listing")
+async def create_pool(payload: Dict[str, Any]):
+    """
+    Плейсхолдер под Raydium pool — возвращает пустую валидную транзу с blockhash.
+    Ожидает: wallet, mint_address, decimals, sol_amount, token_amount.
+    """
+    try:
+        wallet = payload.get("wallet")
+        mint_address = payload.get("mint_address")
+        decimals = int(payload.get("decimals", 9))
+        sol_amount = float(payload.get("sol_amount", 0))
+        token_amount = float(payload.get("token_amount", 0))
+        priority_fee = int(payload.get("priority_fee", 250000))
+        use_token_2022 = bool(payload.get("use_token_2022", True))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address are required")
+
+        res = await create_pool_transaction(
+            connection=connection,
+            wallet=wallet,
+            mint_address=mint_address,
+            decimals=decimals,
+            sol_amount=sol_amount,
+            token_amount=token_amount,
+            priority_fee=priority_fee,
+            use_token_2022=use_token_2022,
+        )
+        if not res.get("success"):
+            raise HTTPException(status_code=500, detail=res.get("message", "create pool failed"))
+
+        tx = res["transaction"]
+        return {
+            "success": True,
+            "transaction": _b64(tx),
+            "pool_id": res.get("pool_id"),
+            "lp_mint": res.get("lp_mint"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating pool: {e}")

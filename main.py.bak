@@ -1,0 +1,255 @@
+import os
+import base64
+import logging
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, validator
+from dotenv import load_dotenv
+from solana.rpc.api import Client
+from solana.rpc.commitment import Confirmed
+import base58
+
+from utils.token_ops import create_token_transaction
+from utils.transfers import create_sol_transfer_transaction
+from utils.authority import (
+    update_mint_authority_transaction,
+    update_freeze_authority_transaction,
+    update_update_authority_transaction,
+)
+from utils.raydium import create_pool_transaction
+from utils.mint import mint_tokens_transaction
+
+load_dotenv()
+
+logger = logging.getLogger("uvicorn.error")
+
+app = FastAPI(title="Solana Token Backend")
+
+# ===== Static SPA (если фронт лежит в soltoken-frontend) =====
+frontend_path = "./soltoken-frontend"
+if os.path.exists(frontend_path):
+
+    @app.get("/")
+    async def read_index():
+        return FileResponse(os.path.join(frontend_path, "index.html"))
+
+    @app.get("/{full_path:path}")
+    async def read_frontend(full_path: str):
+        file_path = os.path.join(frontend_path, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_path, "index.html"))
+
+# ===== CORS (если фронт на другом домене/порту) =====
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # при желании замени на список доменов фронта
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ===== Schemas =====
+class ProceedRequest(BaseModel):
+    wallet: str
+    decimals: int = 9
+    name: str = "Cool Name"
+    symbol: str = "CLSMBL"
+    description: str = "Cool description"
+    pic: str
+    mint_amount: float
+    delete_freeze: bool = True
+    delete_mint: bool = True
+    delete_update: bool = True
+    priority_fee: int = 250000
+    use_token_2022: bool = True
+
+    @validator("wallet")
+    def validate_wallet(cls, v: str) -> str:
+        try:
+            raw = base58.b58decode(v)
+            if len(raw) != 32:
+                raise ValueError("wallet must be 32-byte base58 pubkey")
+        except Exception:
+            raise ValueError("wallet must be a valid Solana public key (base58)")
+        return v
+
+
+class ListingRequest(BaseModel):
+    wallet: str
+    decimals: int
+    mint: str
+    sol_amount: float = 0
+    token_amount: float = 0
+    priority_fee: int = 250000
+    use_token_2022: bool = True
+
+    @validator("wallet", "mint")
+    def validate_pubkeys(cls, v: str) -> str:
+        try:
+            raw = base58.b58decode(v)
+            if len(raw) != 32:
+                raise ValueError("pubkey must be 32-byte base58")
+        except Exception:
+            raise ValueError("invalid base58 pubkey")
+        return v
+
+
+# ===== Health =====
+@app.get("/health")
+def health():
+    rpc = os.getenv("RPC_URL", "https://api.devnet.solana.com")
+    client = Client(rpc)
+    try:
+        ver = client.get_version()
+        version = getattr(ver, "value", None)
+    except Exception as e:
+        version = f"error: {e}"
+    return {"ok": True, "rpc": rpc, "version": version}
+
+
+# ===== Endpoints =====
+@app.post("/api/proceed")
+async def proceed_token_creation(request: ProceedRequest):
+    try:
+        connection = Client(os.getenv("RPC_URL", "https://api.devnet.solana.com"))
+
+        transactions = []
+        token_keypair = None
+
+        # 1) Create token (mint account init)
+        token_result = await create_token_transaction(
+            connection,
+            request.wallet,
+            request.decimals,
+            request.name,
+            request.symbol,
+            request.description,
+            request.pic,              # сейчас это строка; позже можно сделать metadata URI
+            request.priority_fee,
+            request.use_token_2022,
+        )
+        if not token_result["success"]:
+            raise HTTPException(status_code=500, detail=token_result["message"])
+
+        transactions.append(token_result["transaction"])
+        token_keypair = token_result["keypair"]
+        mint_address = token_result["mint"]
+
+        # 2) SOL transfer (0.02)
+        transfer_result = await create_sol_transfer_transaction(
+            connection, request.wallet, 0.02, request.priority_fee
+        )
+        if not transfer_result["success"]:
+            raise HTTPException(status_code=500, detail=transfer_result["message"])
+        transactions.append(transfer_result["transaction"])
+
+        # 3) Mint tokens
+        mint_result = await mint_tokens_transaction(
+            connection,
+            request.wallet,
+            mint_address,
+            request.mint_amount,
+            request.decimals,
+            request.priority_fee,
+            request.use_token_2022,
+        )
+        if not mint_result["success"]:
+            raise HTTPException(status_code=500, detail=mint_result["message"])
+        transactions.append(mint_result["transaction"])
+
+        # 4) Drop authorities (optional)
+        if request.delete_freeze:
+            freeze_result = await update_freeze_authority_transaction(
+                connection, request.wallet, mint_address, request.priority_fee, request.use_token_2022
+            )
+            if freeze_result["success"]:
+                transactions.append(freeze_result["transaction"])
+
+        if request.delete_mint:
+            mint_auth_result = await update_mint_authority_transaction(
+                connection, request.wallet, mint_address, request.priority_fee, request.use_token_2022
+            )
+            if mint_auth_result["success"]:
+                transactions.append(mint_auth_result["transaction"])
+
+        if request.delete_update:
+            update_auth_result = await update_update_authority_transaction(
+                connection, request.wallet, mint_address, request.priority_fee, request.use_token_2022
+            )
+            if update_auth_result["success"]:
+                transactions.append(update_auth_result["transaction"])
+
+        # 5) Serialize transactions for Phantom (sign first one partially with mint keypair)
+        
+        serialized_transactions = []
+        for i, tx in enumerate(transactions):
+            # подпишем только МИНТ транзу (первая) нашим mint keypair
+            if i == 0 and token_keypair:
+                tx.partial_sign(token_keypair)
+            # сериализуем без требования всех сигнатур (кошелёк юзера добавит свою в Phantom)
+            raw = tx.serialize(verify_signatures=False, require_all_signatures=False)
+            serialized_transactions.append(base64.b64encode(raw).decode("utf-8"))
+	return {"ok": True, "token": mint_address, "transactions": serialized_transactions}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("proceed_token_creation failed")
+        raise HTTPException(status_code=500, detail=f"Error in token creation: {e}")
+
+
+@app.post("/api/listing")
+async def create_pool_listing(request: ListingRequest):
+    try:
+        connection = Client(os.getenv("RPC_URL", "https://api.devnet.solana.com"))
+
+        transactions = []
+
+        # 1) Create pool (placeholder)
+        pool_result = await create_pool_transaction(
+            connection,
+            request.wallet,
+            request.mint,
+            request.decimals,
+            request.sol_amount,
+            request.token_amount,
+            request.priority_fee,
+            request.use_token_2022,
+        )
+        if not pool_result["success"]:
+            raise HTTPException(status_code=500, detail=pool_result["message"])
+        transactions.append(pool_result["transaction"])
+
+        # 2) SOL transfer (0.1)
+        transfer_result = await create_sol_transfer_transaction(
+            connection, request.wallet, 0.1, request.priority_fee
+        )
+        if not transfer_result["success"]:
+            raise HTTPException(status_code=500, detail=transfer_result["message"])
+        transactions.append(transfer_result["transaction"])
+
+        # 3) Serialize
+        serialized_transactions = [
+            base64.b64encode(tx.serialize(verify_signatures=False, require_all_signatures=False)).decode("utf-8")
+            for tx in transactions
+        ]
+
+        return {
+            "ok": True,
+            "transactions": serialized_transactions,
+            "pool_id": pool_result.get("pool_id"),
+            "lp_mint": pool_result.get("lp_mint"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("create_pool_listing failed")
+        raise HTTPException(status_code=500, detail=f"Error in pool creation: {e}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=80)
