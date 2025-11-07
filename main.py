@@ -3,6 +3,8 @@ from utils.compat import recent_blockhash
 
 import os
 import base64
+import logging
+import time
 from typing import Optional, Any, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -55,6 +57,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+logger = logging.getLogger("uvicorn.error")
+
 # =====================================================================
 # SCHEMAS
 # =====================================================================
@@ -81,16 +85,28 @@ class ListingReq(BaseModel):
 # =====================================================================
 
 def _b64(tx: Transaction) -> str:
-    raw = tx.serialize(verify_signatures=False)  # подпишет кошелёк на фронте
-    return base64.b64encode(raw).decode("utf-8")
+    start_time = time.time()
+    try:
+        raw = tx.serialize(verify_signatures=False)
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"Transaction serialized: size={len(raw)} bytes, "
+            f"instructions={len(tx.instructions)}, elapsed={elapsed_ms:.2f}ms"
+        )
+        return base64.b64encode(raw).decode("utf-8")
+    except Exception as e:
+        logger.error(
+            f"Transaction serialization failed: {type(e).__name__}: {e}, "
+            f"elapsed={(time.time() - start_time) * 1000:.2f}ms",
+            exc_info=True
+        )
+        raise
 
 def _ensure_main_fields(conn: Client, tx: Transaction, fee_payer: str) -> None:
-    # fee payer + свежий блокхеш строго из того же RPC
     tx.fee_payer = PublicKey(fee_payer)
     tx.recent_blockhash = recent_blockhash(conn)
 
 def _append_fixed_charge(tx: Transaction, user_wallet: str) -> None:
-    # добавляем перевод FIXED_CHARGE_SOL → CHARGE_TO (в той же транзе)
     if not CHARGE_TO:
         return
     lamports = int(FIXED_CHARGE_SOL * 1_000_000_000)
