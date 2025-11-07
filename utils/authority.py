@@ -66,7 +66,7 @@ async def update_freeze_authority_transaction(connection: Client, wallet: str, m
 
 
 async def update_update_authority_transaction(connection: Client, wallet: str, mint_address: str,
-                                              priority_fee: int = 250000, use_token_2022: bool = True):
+                                            priority_fee: int = 250000, use_token_2022: bool = True):
     try:
         return await update_mint_authority_transaction(connection, wallet, mint_address, priority_fee, use_token_2022)
     except Exception as e:
