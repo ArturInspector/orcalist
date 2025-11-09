@@ -123,10 +123,12 @@
   // элементы
   const elCreateBtn = document.getElementById("createTokenBtn");
   const elModal = document.getElementById("modalSuccess");
+  const elModalError = document.getElementById("modalError");
   const elLoadInfo = document.querySelector(".load__info");
   const elExplorer = document.getElementById("explorerLink");
   const elSolscan = document.getElementById("solcanLink");
   const elModalAddress = document.getElementById("modalAddressWallet");
+  const elModalErrorText = document.querySelector("#modalError .modal-xe__error");
 
   function short(addr) {
     if (!addr || addr.length < 10) return addr || "";
@@ -194,7 +196,21 @@
       }
     } catch (e) {
       console.error(e);
-      if (elLoadInfo) elLoadInfo.textContent = String(e?.message || e);
+      const errorMessage = String(e?.message || e || "Unknown error occurred");
+      
+      if (elLoadInfo) {
+        elLoadInfo.style.display = "none";
+      }
+      
+      if (elModalErrorText) {
+        elModalErrorText.textContent = errorMessage;
+      }
+      
+      if (elModalError) {
+        elModalError.classList.add("active");
+        document.documentElement.style.overflow = "hidden";
+        document.body.classList.add("active");
+      }
     } finally {
       if (elCreateBtn) elCreateBtn.disabled = false;
     }
@@ -243,10 +259,22 @@
       if (modalTitle) modalTitle.textContent = "Liquidity pool transaction sent (devnet)!";
     } catch (e) {
       console.error(e);
+      const errorMessage = String(e?.message || e || "Failed to create liquidity pool");
+      
       const solValueInput = document.getElementById("solValue");
       const tokenAmountPool = document.getElementById("tokenAmountPool");
       if (solValueInput) solValueInput.style.border = "2px solid red";
       if (tokenAmountPool) tokenAmountPool.style.border = "2px solid red";
+      
+      if (elModalErrorText) {
+        elModalErrorText.textContent = errorMessage;
+      }
+      
+      if (elModalError) {
+        elModalError.classList.add("active");
+        document.documentElement.style.overflow = "hidden";
+        document.body.classList.add("active");
+      }
     }
   }
 
@@ -282,6 +310,15 @@
   if (closeModal) {
     closeModal.addEventListener("click", () => {
       if (elModal) elModal.classList.remove("active");
+      document.documentElement.style.overflow = "";
+      document.body.classList.remove("active");
+    });
+  }
+
+  const closeErrorModal = document.getElementById("modalErrorClose");
+  if (closeErrorModal) {
+    closeErrorModal.addEventListener("click", () => {
+      if (elModalError) elModalError.classList.remove("active");
       document.documentElement.style.overflow = "";
       document.body.classList.remove("active");
     });

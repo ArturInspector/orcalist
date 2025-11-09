@@ -2,8 +2,8 @@
 /// steps.js — devnet версия, без ES-модулей
 (() => {
   // ========= CONFIG =========
-  const RPC_URL = "https://api.devnet.solana.com"; // devnet
   const API_BASE = ""; // бек смонтирован на том же домене, /api/...
+  const RPC_URL = "https://api.devnet.solana.com"; // только для получения blockhash, отправка через прокси
 
   // web3 глобаль приходит из <script src="...iife.min.js">
   const { Connection, PublicKey, Transaction } = window.solanaWeb3;
@@ -59,20 +59,30 @@
     return provider.wallet.signAllTransactions(txs);
   }
 
-  async function sendAndConfirm(connection, signedTx) {
-    const sig = await connection.sendRawTransaction(signedTx.serialize(), {
-      skipPreflight: false,
-      maxRetries: 3,
+  async function sendTransactionViaProxy(signedTx) {
+    // Отправляем транзакцию через бэк прокси (защищает API ключ QuickNode)
+    const signedTxBytes = signedTx.serialize();
+    const signedTxB64 = btoa(String.fromCharCode(...signedTxBytes));
+    
+    const response = await fetch(`${API_BASE}/api/send-transaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signed_tx: signedTxB64 })
     });
-    // devnet подтверждение
-    await connection.confirmTransaction(sig, "confirmed");
-    return sig;
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+      throw new Error(error.detail || "Failed to send transaction");
+    }
+    
+    const result = await response.json();
+    return result.signature;
   }
 
   async function sendAll(connection, signedTxs) {
     const sigs = [];
     for (const stx of signedTxs) {
-      const sig = await sendAndConfirm(connection, stx);
+      const sig = await sendTransactionViaProxy(stx);
       sigs.push(sig);
       await sleep(150);
     }
@@ -81,6 +91,8 @@
 
   // Универсалка под /api/proceed и /api/listing
   async function signAndSendFromApiResponse(apiData, feePayer) {
+    // Используем публичный RPC только для получения blockhash
+    // Отправка транзакций идет через бэк прокси (защищает QuickNode API ключ)
     const connection = new Connection(RPC_URL, "confirmed");
     const provider = await getProvider();
 
