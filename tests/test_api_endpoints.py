@@ -36,8 +36,6 @@ async def test_proceed_creates_valid_transaction(client: AsyncClient) -> None:
     assert "tx" in data
     assert "mint" in data
     assert "seed" in data
-    
-    # проверяем что транзакция валидная - можем десериализовать
     tx_b64 = data["tx"]
     tx_bytes = base64.b64decode(tx_b64)
     tx = Transaction.deserialize(tx_bytes)
