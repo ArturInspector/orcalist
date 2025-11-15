@@ -36,7 +36,7 @@ async def test_listing_validates_wallet(client: AsyncClient) -> None:
     
     response = await client.post("/api/listing", json=payload)
     assert response.status_code == 400
-    assert "Invalid payer wallet" in response.json()["detail"]
+    assert "Invalid request" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def test_listing_validates_amount(client: AsyncClient) -> None:
     for payload in test_cases:
         response = await client.post("/api/listing", json=payload)
         assert response.status_code == 400
-        assert "wallet/amount required" in response.json()["detail"]
+        assert "Invalid request" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

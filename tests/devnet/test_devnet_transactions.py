@@ -8,7 +8,7 @@ from solana.transaction import Transaction
 from solana.publickey import PublicKey
 from solana import system_program
 import main
-from utils.token_ops import PROGRAM_ID
+from spl.token.constants import TOKEN_PROGRAM_ID
 
 DEVNET_WALLET = os.getenv("DEVNET_TEST_WALLET", "6gCw4YyWaRCg6nGXiQTNyHwVRBnQsj5rVJf7PHQEwdcE")
 DEVNET_RPC = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
@@ -61,7 +61,7 @@ async def test_proceed_creates_valid_devnet_transaction(client: AsyncClient, rpc
     expected_mint = PublicKey.create_with_seed(
         PublicKey(DEVNET_WALLET),
         seed,
-        PROGRAM_ID
+        TOKEN_PROGRAM_ID
     )
     assert str(expected_mint) == mint
 

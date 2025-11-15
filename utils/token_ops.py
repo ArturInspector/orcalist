@@ -17,15 +17,17 @@ from spl.token.instructions import (
 )
 
 from utils.compat import recent_blockhash
+from utils.metadata import (
+    find_metadata_account,
+    create_metadata_instruction_v3,
+)
 
-
-PROGRAM_ID = TOKEN_PROGRAM_ID  # Token-2022 не трогаем, чтобы не ловить несовместимости
+TOKEN_2022_PROGRAM_ID = PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
 
 
 def _rent_exempt(connection: Client, size: int) -> int:
     """Возвращает кол-во лампортов для rent-exempt, независимо от формы ответа."""
     resp = connection.get_minimum_balance_for_rent_exemption(size)
-    # Возможные варианты: объект с .value, просто int, либо dict с "result"
     val = getattr(resp, "value", None)
     if val is None:
         if isinstance(resp, int):
@@ -46,33 +48,31 @@ async def create_token_transaction(
     description: str = "",
     metadata_uri: str = "",
     priority_fee: int = 250000,
-    use_token_2022: bool = False,  # оставляем SPL Token v2
+    use_token_2022: bool = False,
 ) -> Dict[str, Any]:
     try:
         wallet_pk = PublicKey(wallet)
+        program_id = TOKEN_2022_PROGRAM_ID if use_token_2022 else TOKEN_PROGRAM_ID
 
-        # Делаем детерминированный mint через seed -> signer только кошелёк
-        seed = (symbol or "mint")[:16] or "mint"  # <= 32 байт, лучше короче
-        mint_pk = PublicKey.create_with_seed(wallet_pk, seed, PROGRAM_ID)
+        seed = (symbol or "mint")[:16] or "mint"
+        mint_pk = PublicKey.create_with_seed(wallet_pk, seed, program_id)
 
-        # Rent-exempt размер под MINT
         mint_size = MINT_LAYOUT.sizeof()
         lamports = _rent_exempt(connection, mint_size)
 
         tx = Transaction()
         tx.fee_payer = wallet_pk
 
-        # ВАЖНО: здесь параметр называется base_pubkey (НЕ 'base')
         tx.add(
             create_account_with_seed(
                 CreateAccountWithSeedParams(
-                    from_pubkey=wallet_pk,          # единственный signer будет твой кошелёк
-                    base_pubkey=wallet_pk,          # база для сид-адреса
+                    from_pubkey=wallet_pk,
+                    base_pubkey=wallet_pk,
                     seed=seed,
-                    new_account_pubkey=mint_pk,     # вычисленный адрес аккаунта mint
+                    new_account_pubkey=mint_pk,
                     lamports=lamports,
                     space=mint_size,
-                    program_id=PROGRAM_ID,
+                    program_id=program_id,
                 )
             )
         )
@@ -80,7 +80,7 @@ async def create_token_transaction(
         tx.add(
             initialize_mint(
                 InitializeMintParams(
-                    program_id=PROGRAM_ID,
+                    program_id=program_id,
                     mint=mint_pk,
                     decimals=int(decimals),
                     mint_authority=wallet_pk,
@@ -89,12 +89,35 @@ async def create_token_transaction(
             )
         )
 
-        # Без подписей на бэке — только blockhash
+        if metadata_uri or name or symbol:
+            try:
+                metadata_account = find_metadata_account(mint_pk)
+                
+                tx.add(
+                    create_metadata_instruction_v3(
+                        metadata_account=metadata_account,
+                        mint=mint_pk,
+                        mint_authority=wallet_pk,
+                        payer=wallet_pk,
+                        update_authority=wallet_pk,
+                        name=name or symbol or "Token",
+                        symbol=symbol or "TKN",
+                        uri=metadata_uri or "",
+                        is_mutable=True,
+                    )
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger("uvicorn.error").warning(
+                    f"Failed to add metadata instruction: {type(e).__name__}: {e}"
+                )
+                pass
+
         tx.recent_blockhash = recent_blockhash(connection)
 
         return {
             "success": True,
-            "transaction": tx,   # main.py сам сериализует в base64
+            "transaction": tx,
             "mint": str(mint_pk),
             "seed": seed,
         }

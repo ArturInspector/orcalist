@@ -123,7 +123,7 @@ async def api_proceed(req: ProceedReq, request: Request):
     logger.info(
         f"POST /api/proceed: wallet={safe_wallet_log(req.wallet)}, "
         f"wallet_hash={hash_wallet(req.wallet)}, "
-        f"symbol={req.symbol}, decimals={req.decimals}, token_2022={req.use_token_2022}"
+        f"symbol={req.symbol}, decimals={req.decimals}"
     )
     try:
         try:

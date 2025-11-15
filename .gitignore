@@ -7,3 +7,9 @@ pytest.ini
 __pycache__/
 test.md
 MAIN_PIPELINES.md
+.env
+
+soltoken-frontend/node_modules/
+soltoken-frontend/package-lock.json
+soltoken-frontend/package.json
+docs/

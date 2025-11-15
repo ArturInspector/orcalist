@@ -57,7 +57,7 @@ async def test_proceed_rejects_invalid_wallet(client: AsyncClient) -> None:
     
     assert response.status_code == 400
     data = response.json()
-    assert "Invalid payer wallet" in data["detail"]
+    assert "Invalid request" in data["detail"]
 
 
 @pytest.mark.asyncio
@@ -118,7 +118,7 @@ async def test_listing_rejects_invalid_amount(client: AsyncClient) -> None:
     
     assert response.status_code == 400
     data = response.json()
-    assert "wallet/amount required" in data["detail"]
+    assert "Invalid request" in data["detail"]
 
 
 @pytest.mark.asyncio
