@@ -1,9 +1,11 @@
 from utils.compat import recent_blockhash
 from decimal import Decimal
+from typing import Dict, Any
 
 from solana.rpc.api import Client
 from solana.transaction import Transaction
 from spl.token.constants import TOKEN_PROGRAM_ID
+from spl.token._layouts import MINT_LAYOUT
 from spl.token.instructions import (
     get_associated_token_address,
     create_associated_token_account,
@@ -11,12 +13,63 @@ from spl.token.instructions import (
     MintToCheckedParams,
 )
 
-from solders.pubkey import Pubkey as PublicKey
+from solana.publickey import PublicKey
 
 from utils.transfers import add_priority_fee
-from utils.rpc_helpers import get_blockhash
 
-TOKEN_2022_PROGRAM_ID = PublicKey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+TOKEN_2022_PROGRAM_ID = PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+
+
+async def get_mint_info(connection: Client, mint_address: str) -> Dict[str, Any]:
+    try:
+        mint_pubkey = PublicKey(mint_address)
+        resp = connection.get_account_info(mint_pubkey)
+        account_info = None
+        
+        if hasattr(resp, 'value') and resp.value:
+            account_info = resp.value
+        elif hasattr(resp, 'result') and resp.result:
+            account_info = resp.result.get('value') if isinstance(resp.result, dict) else resp.result
+        elif isinstance(resp, dict):
+            account_info = resp.get('result', {}).get('value')
+        
+        if not account_info:
+            return {
+                "success": False, 
+                "message": "Mint account not found on blockchain. Make sure token creation transaction was sent and confirmed."
+            }
+        
+        if not hasattr(account_info, 'data') or not account_info.data:
+            return {
+                "success": False,
+                "message": "Mint account exists but has no data. Transaction may still be confirming."
+            }
+        data = account_info.data
+        if isinstance(data, list):
+            data = bytes(data)
+        elif hasattr(data, '__iter__') and not isinstance(data, (str, bytes)):
+            data = bytes(data)
+        
+        mint_data = MINT_LAYOUT.parse(data)
+        decimals = mint_data.decimals
+    
+        owner = account_info.owner if hasattr(account_info, 'owner') else None
+        if not owner:
+            if hasattr(resp, 'value') and hasattr(resp.value, 'owner'):
+                owner = resp.value.owner
+    
+        if isinstance(owner, str):
+            owner = PublicKey(owner)
+        use_token_2022 = str(owner) == str(TOKEN_2022_PROGRAM_ID) if owner else False
+        
+        return {
+            "success": True,
+            "decimals": decimals,
+            "program_id": owner,
+            "use_token_2022": use_token_2022
+        } # возвращаем decimals, program_id и use_token_2022
+    except Exception as e:
+        return {"success": False, "message": f"Error getting mint info: {e}"}
 
 
 async def mint_tokens_transaction(
@@ -29,8 +82,8 @@ async def mint_tokens_transaction(
     use_token_2022: bool = True,
 ):
     try:
-        wallet_pubkey = PublicKey.from_string(wallet)
-        mint_pubkey = PublicKey.from_string(mint_address)
+        wallet_pubkey = PublicKey(wallet)
+        mint_pubkey = PublicKey(mint_address)
         program_id = TOKEN_2022_PROGRAM_ID if use_token_2022 else TOKEN_PROGRAM_ID
 
         tx = Transaction()
@@ -39,14 +92,18 @@ async def mint_tokens_transaction(
         add_priority_fee(tx, priority_fee)
 
         ata = get_associated_token_address(owner=wallet_pubkey, mint=mint_pubkey)
-        ata_info = connection.resp_value(connection.get_account_info(ata))
-        # у тебя Client возвращает dict-подобные ответы для account_info? Если да:
-        if isinstance(ata_info, dict):
-            value = ata_info.get("result", {}).get("value")
-            need_create = value is None
-        else:
-            # на случай клиент-объектов
-            need_create = getattr(ata_info, "value", None) is None
+        resp = connection.get_account_info(ata)
+        
+        # проверяем существует ли ATA
+        account_info = None
+        if hasattr(resp, 'value') and resp.value:
+            account_info = resp.value
+        elif hasattr(resp, 'result') and resp.result:
+            account_info = resp.result.get('value') if isinstance(resp.result, dict) else resp.result
+        elif isinstance(resp, dict):
+            account_info = resp.get('result', {}).get('value')
+        
+        need_create = account_info is None
 
         if need_create:
             tx.add(

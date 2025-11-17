@@ -1,6 +1,6 @@
 # main.py - point of enter
 import os
-
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -41,3 +41,6 @@ app.include_router(router)
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "soltoken-frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

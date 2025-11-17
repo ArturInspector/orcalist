@@ -53,7 +53,6 @@ async def create_token_transaction(
     try:
         wallet_pk = PublicKey(wallet)
         program_id = TOKEN_2022_PROGRAM_ID if use_token_2022 else TOKEN_PROGRAM_ID
-
         seed = (symbol or "mint")[:16] or "mint"
         mint_pk = PublicKey.create_with_seed(wallet_pk, seed, program_id)
 

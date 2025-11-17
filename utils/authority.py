@@ -48,7 +48,7 @@ def _get_freeze_authority(connection: Client, mint_pubkey: PublicKey):
         
         return freeze_pubkey
     except Exception:
-        # если не получилось прочитать - возвращаем None, пусть попробует с wallet
+        # пусть попробует с wallet
         return None
 
 

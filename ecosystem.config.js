@@ -2,10 +2,9 @@ module.exports = {
   apps: [
     {
       name: "api",
-      cwd: "/root/soltokenmint",
-      script: "uvicorn",
-      args: "main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
-      interpreter: "/root/soltokenmint/.venv/bin/python",
+      cwd: "/home/ludskoe/kwork/soltoken",
+      script: "/home/ludskoe/kwork/soltoken/venv/bin/python",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
       env: {
         RPC_URL: "https://api.devnet.solana.com",
         CHARGE_TO: "GxdD2CM13WMgV7ikvsX6zPi6JbNoWN88RZbSNMfXsCuM",
@@ -16,10 +15,9 @@ module.exports = {
     },
     {
       name: "front",
-      script: "pm2",
-      args: "serve /root/soltokenmint/soltoken-frontend 3000 --spa",
+      script: "/home/ludskoe/.nvm/versions/node/v20.19.5/lib/node_modules/pm2/lib/API/Serve.js",
+      args: "/home/ludskoe/kwork/soltoken/soltoken-frontend 3000",
       env: {
-        // если фронт ходит к этому же бэку, в steps.js просто ставь API_BASE="")
         NODE_ENV: "production"
       }
     }

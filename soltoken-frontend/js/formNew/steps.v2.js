@@ -3,7 +3,27 @@
 (() => {
   // ========= CONFIG =========
   const RPC_URL = "https://api.devnet.solana.com"; // devnet
-  const API_BASE = ""; // бек смонтирован на том же домене, /api/...
+  // Определяем базовый URL API автоматически.
+  // 1) meta[name="api-base"] имеет приоритет
+  // 2) если фронт работает на 3000 → шьём :8000 на тот же host
+  // 3) иначе — тот же origin (пустая строка = относительные пути)
+  const API_BASE = (() => {
+    try {
+      const meta = document.querySelector('meta[name="api-base"]');
+      const fromMeta = meta && meta.getAttribute('content');
+      if (fromMeta && typeof fromMeta === 'string') {
+        return fromMeta.replace(/\/$/, '');
+      }
+      const loc = window.location;
+      const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
+      if (port === 3000) {
+        return `${loc.protocol}//${loc.hostname}:8000`;
+      }
+      return "";
+    } catch (_e) {
+      return "";
+    }
+  })();
 
   // web3 глобаль приходит из <script src="...iife.min.js">
   const { Connection, PublicKey, Transaction } = window.solanaWeb3;
@@ -123,12 +143,10 @@
   // элементы
   const elCreateBtn = document.getElementById("createTokenBtn");
   const elModal = document.getElementById("modalSuccess");
-  const elModalError = document.getElementById("modalError");
   const elLoadInfo = document.querySelector(".load__info");
   const elExplorer = document.getElementById("explorerLink");
   const elSolscan = document.getElementById("solcanLink");
   const elModalAddress = document.getElementById("modalAddressWallet");
-  const elModalErrorText = document.querySelector("#modalError .modal-xe__error");
 
   function short(addr) {
     if (!addr || addr.length < 10) return addr || "";
@@ -196,21 +214,7 @@
       }
     } catch (e) {
       console.error(e);
-      const errorMessage = String(e?.message || e || "Unknown error occurred");
-      
-      if (elLoadInfo) {
-        elLoadInfo.style.display = "none";
-      }
-      
-      if (elModalErrorText) {
-        elModalErrorText.textContent = errorMessage;
-      }
-      
-      if (elModalError) {
-        elModalError.classList.add("active");
-        document.documentElement.style.overflow = "hidden";
-        document.body.classList.add("active");
-      }
+      if (elLoadInfo) elLoadInfo.textContent = String(e?.message || e);
     } finally {
       if (elCreateBtn) elCreateBtn.disabled = false;
     }
@@ -259,22 +263,10 @@
       if (modalTitle) modalTitle.textContent = "Liquidity pool transaction sent (devnet)!";
     } catch (e) {
       console.error(e);
-      const errorMessage = String(e?.message || e || "Failed to create liquidity pool");
-      
       const solValueInput = document.getElementById("solValue");
       const tokenAmountPool = document.getElementById("tokenAmountPool");
       if (solValueInput) solValueInput.style.border = "2px solid red";
       if (tokenAmountPool) tokenAmountPool.style.border = "2px solid red";
-      
-      if (elModalErrorText) {
-        elModalErrorText.textContent = errorMessage;
-      }
-      
-      if (elModalError) {
-        elModalError.classList.add("active");
-        document.documentElement.style.overflow = "hidden";
-        document.body.classList.add("active");
-      }
     }
   }
 
@@ -315,12 +307,65 @@
     });
   }
 
-  const closeErrorModal = document.getElementById("modalErrorClose");
-  if (closeErrorModal) {
-    closeErrorModal.addEventListener("click", () => {
-      if (elModalError) elModalError.classList.remove("active");
-      document.documentElement.style.overflow = "";
-      document.body.classList.remove("active");
+  const stepOne = document.getElementById("stepOne");
+  const stepTwo = document.getElementById("stepTwo");
+  const stepThree = document.getElementById("stepThree");
+
+  const stepNumOne = document.getElementById("stepNumOne");
+  const stepNumTwo = document.getElementById("stepNumTwo");
+  const stepNumThree = document.getElementById("stepNumThree");
+
+  const btnChooseSupply = document.getElementById("manipulationBtn");
+  const btnNextStepTwo = document.getElementById("nextStepTwoBtn");
+  const stepThreeData = document.getElementById("stepThreeData");
+  function setStep(active) {
+    if (stepOne) stepOne.style.display = active === 1 ? "block" : "none";
+    if (stepTwo) stepTwo.style.display = active === 2 ? "block" : "none";
+    if (stepThree) stepThree.style.display = active === 3 ? "block" : "none";
+
+    if (stepNumOne) {
+      if (active === 1) stepNumOne.classList.add("make__step--active");
+      else stepNumOne.classList.remove("make__step--active");
+    }
+    if (stepNumTwo) {
+      if (active === 2) stepNumTwo.classList.add("make__step--active");
+      else stepNumTwo.classList.remove("make__step--active");
+    }
+    if (stepNumThree) {
+      if (active === 3) stepNumThree.classList.add("make__step--active");
+      else stepNumThree.classList.remove("make__step--active");
+    }
+
+    if (btnChooseSupply) btnChooseSupply.style.display = active === 1 ? "inline-block" : "none";
+    if (btnNextStepTwo) btnNextStepTwo.style.display = active === 2 ? "inline-block" : "none";
+    if (stepThreeData) stepThreeData.style.display = active === 3 ? "block" : "none";
+  }
+
+  try {
+    const storedWallet = sessionStorage.getItem("walletAddress");
+    if (storedWallet) setStep(1);
+  } catch (_) {}
+
+  if (btnChooseSupply) {
+    btnChooseSupply.addEventListener("click", () => setStep(2));
+  }
+  if (btnNextStepTwo) {
+    btnNextStepTwo.addEventListener("click", () => setStep(3));
+  }
+
+
+  const selectLogoBtn = document.querySelector(".make__select");
+  const logoInput = document.getElementById("tokenLogo");
+  if (selectLogoBtn && logoInput) {
+    selectLogoBtn.addEventListener("click", () => logoInput.click());
+    logoInput.addEventListener("change", () => {
+      const file = logoInput.files && logoInput.files[0];
+      if (!file) return;
+      // пока просто кладём Blob URL, загрузка на IPFS будет отдельно
+      window.formData = window.formData || {};
+      window.formData.tokenLogo = URL.createObjectURL(file); // FIXME: заменить на реальный IPFS URL
+      const label = document.querySelector(".make__select-text");
+      if (label) label.textContent = file.name || "logo selected";
     });
   }
 })();
