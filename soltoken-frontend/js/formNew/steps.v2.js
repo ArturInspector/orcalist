@@ -185,7 +185,7 @@
           description,
           metadata_uri: ipfsLogo,
           priority_fee: 0,          // на devnet не нужен
-          use_token_2022: true
+          use_token_2022: true  // Token-2022 с расширениями
         }),
       });
 
@@ -310,7 +310,7 @@
   const stepOne = document.getElementById("stepOne");
   const stepTwo = document.getElementById("stepTwo");
   const stepThree = document.getElementById("stepThree");
-
+  
   const stepNumOne = document.getElementById("stepNumOne");
   const stepNumTwo = document.getElementById("stepNumTwo");
   const stepNumThree = document.getElementById("stepNumThree");
@@ -354,18 +354,62 @@
   }
 
 
+  // Загрузка файла на IPFS через бэкенд
+  async function uploadToIPFS(file) {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const response = await fetch(`${API_BASE}/api/upload-ipfs`, {
+        method: "POST",
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      if (!data.success || !data.ipfs_url) {
+        throw new Error(data.message || "Upload failed");
+      }
+      
+      return data.ipfs_url;
+    } catch (error) {
+      console.error("IPFS upload failed:", error);
+      throw error;
+    }
+  }
+
   const selectLogoBtn = document.querySelector(".make__select");
   const logoInput = document.getElementById("tokenLogo");
   if (selectLogoBtn && logoInput) {
     selectLogoBtn.addEventListener("click", () => logoInput.click());
-    logoInput.addEventListener("change", () => {
+    logoInput.addEventListener("change", async () => {
       const file = logoInput.files && logoInput.files[0];
       if (!file) return;
-      // пока просто кладём Blob URL, загрузка на IPFS будет отдельно
+      
       window.formData = window.formData || {};
-      window.formData.tokenLogo = URL.createObjectURL(file); // FIXME: заменить на реальный IPFS URL
       const label = document.querySelector(".make__select-text");
-      if (label) label.textContent = file.name || "logo selected";
+      const sublabel = document.querySelector(".make__select-subtext");
+      
+      if (label) label.textContent = "Uploading to IPFS...";
+      if (sublabel) sublabel.textContent = "Please wait";
+      
+      try {
+        const ipfsUrl = await uploadToIPFS(file);
+        window.formData.tokenLogo = ipfsUrl;
+        
+        if (label) label.textContent = file.name || "logo uploaded";
+        if (sublabel) sublabel.textContent = "IPFS: " + ipfsUrl.substring(0, 30) + "...";
+        
+        console.log("Image uploaded to IPFS:", ipfsUrl);
+      } catch (error) {
+        console.error("Failed to upload to IPFS:", error);
+        if (label) label.textContent = "Upload failed, using local";
+        if (sublabel) sublabel.textContent = "Click to retry";
+        window.formData.tokenLogo = URL.createObjectURL(file);
+      }
     });
   }
 })();

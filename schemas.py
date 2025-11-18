@@ -11,7 +11,7 @@ class ProceedReq(BaseModel):
     description: Optional[str] = "Cool description"
     metadata_uri: Optional[str] = ""   # IPFS-лого с фронта
     priority_fee: int = 250_000
-    use_token_2022: bool = True
+    use_token_2022: bool = True  # Token-2022 с расширениями
 
 
 class ListingReq(BaseModel):
