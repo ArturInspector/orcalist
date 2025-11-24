@@ -95,45 +95,63 @@ async function createBaseToken2022({
   // Расходы первой транзакции (которые пользователь платит дополнительно к fixed_charge)
   const FIRST_TX_RENT_LAMPORTS = lamports; // Rent для mint аккаунта
   
-  // Симулируем транзакцию БЕЗ fixed charge, чтобы получить реальную network fee
-  // Делаем это ДО добавления transfer инструкции
+  // Симулируем транзакцию С transfer инструкцией, чтобы получить реальную network fee
+  // Сначала рассчитываем примерный adjustedChargeLamports для тестовой транзакции
   let firstTxFeeLamports = 5_000; // Fallback значение
-  try {
-    console.log('[createBaseToken2022] Simulating transaction to get real network fee...');
-    const testTransaction = new Transaction();
-    testTransaction.add(priorityFeeIx);
-    testTransaction.add(createAccountIx);
-    testTransaction.add(initMintIx);
-    
-    const { blockhash: testBlockhash } = await connection.getLatestBlockhash('finalized');
-    testTransaction.recentBlockhash = testBlockhash;
-    testTransaction.feePayer = payer;
-    
-    // Подписываем только mint keypair (как в реальной транзакции)
-    testTransaction.partialSign(mintKeypair);
-    
-    const simulation = await connection.simulateTransaction(testTransaction, {
-      replaceRecentBlockhash: true,
-      sigVerify: false,
-    });
-    
-    if (simulation?.value && !simulation.value.err) {
-      firstTxFeeLamports = simulation.value.fee || 5_000;
-      console.log(`[createBaseToken2022] ✅ Real network fee from simulation: ${firstTxFeeLamports} lamports (${firstTxFeeLamports / 1_000_000_000} SOL)`);
-    } else {
-      console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee: ${firstTxFeeLamports} lamports`);
-    }
-  } catch (simError) {
-    console.warn(`[createBaseToken2022] ⚠️ Simulation error, using fallback fee: ${simError.message}`);
-  }
-  
-  const FIRST_TX_TOTAL_LAMPORTS = FIRST_TX_RENT_LAMPORTS + firstTxFeeLamports;
-  
   let adjustedChargeLamports = 0;
+  
   if (chargeTo && fixedChargeSol > 0) {
     try {
       const chargeToPubkey = new PublicKey(chargeTo);
       const fixedChargeLamports = Math.floor(fixedChargeSol * 1_000_000_000);
+      
+      // Первая оценка: используем примерную fee для расчета примерного transfer
+      const estimatedFirstTxFee = 5_000; // Примерная fee без transfer
+      const estimatedFirstTxTotal = FIRST_TX_RENT_LAMPORTS + estimatedFirstTxFee;
+      const estimatedAdjustedCharge = Math.max(0, fixedChargeLamports - SECOND_TX_TOTAL_LAMPORTS - estimatedFirstTxTotal);
+      
+      // Симулируем транзакцию С transfer инструкцией для получения реальной fee
+      try {
+        console.log('[createBaseToken2022] Simulating transaction WITH transfer to get real network fee...');
+        const testTransaction = new Transaction();
+        testTransaction.add(priorityFeeIx);
+        testTransaction.add(createAccountIx);
+        testTransaction.add(initMintIx);
+        
+        // Добавляем transfer с примерным значением
+        if (estimatedAdjustedCharge > 0) {
+          const testTransferIx = SystemProgram.transfer({
+            fromPubkey: payer,
+            toPubkey: chargeToPubkey,
+            lamports: estimatedAdjustedCharge,
+          });
+          testTransaction.add(testTransferIx);
+        }
+        
+        const { blockhash: testBlockhash } = await connection.getLatestBlockhash('finalized');
+        testTransaction.recentBlockhash = testBlockhash;
+        testTransaction.feePayer = payer;
+        
+        // Подписываем только mint keypair (как в реальной транзакции)
+        testTransaction.partialSign(mintKeypair);
+        
+        const simulation = await connection.simulateTransaction(testTransaction, {
+          replaceRecentBlockhash: true,
+          sigVerify: false,
+        });
+        
+        if (simulation?.value && !simulation.value.err) {
+          firstTxFeeLamports = simulation.value.fee || 5_000;
+          console.log(`[createBaseToken2022] ✅ Real network fee from simulation (WITH transfer): ${firstTxFeeLamports} lamports (${firstTxFeeLamports / 1_000_000_000} SOL)`);
+        } else {
+          console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee: ${firstTxFeeLamports} lamports`);
+        }
+      } catch (simError) {
+        console.warn(`[createBaseToken2022] ⚠️ Simulation error, using fallback fee: ${simError.message}`);
+      }
+      
+      // Теперь рассчитываем adjustedChargeLamports с правильной fee
+      const FIRST_TX_TOTAL_LAMPORTS = FIRST_TX_RENT_LAMPORTS + firstTxFeeLamports;
       adjustedChargeLamports = Math.max(0, fixedChargeLamports - SECOND_TX_TOTAL_LAMPORTS - FIRST_TX_TOTAL_LAMPORTS);
       
       if (adjustedChargeLamports > 0) {
