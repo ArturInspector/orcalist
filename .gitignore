@@ -13,3 +13,5 @@ soltoken-frontend/node_modules/
 soltoken-frontend/package-lock.json
 soltoken-frontend/package.json
 docs/
+
+node_modules/

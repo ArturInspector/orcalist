@@ -3,7 +3,8 @@
 (() => {
   // ========= CONFIG =========
   const RPC_URL = "https://api.devnet.solana.com"; // devnet
-  const API_BASE = ""; // бек смонтирован на том же домене, /api/...
+  const API_BASE = ""; // Python API (Pinata)
+  const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
 
   // web3 глобаль приходит из <script src="...iife.min.js">
   const { Connection, PublicKey, Transaction } = window.solanaWeb3;
@@ -152,8 +153,29 @@
       const description = document.getElementById("description")?.value || "";
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
 
-      // Вызов бэка — он собирает транзу (создание + фикс-чардж)
-      const r = await fetch(`${API_BASE}/api/proceed`, {
+      // STEP 1: Upload metadata to IPFS (Python API)
+      let metadataUri = "";
+      if (ipfsLogo || description) {
+        if (elLoadInfo) elLoadInfo.textContent = "Uploading metadata to IPFS...";
+        const metaResp = await fetch(`${API_BASE}/api/upload-metadata`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: tokenName,
+            symbol: tokenSymbol,
+            description,
+            image: ipfsLogo
+          }),
+        });
+        const metaData = await metaResp.json();
+        if (metaResp.ok && metaData?.uri) {
+          metadataUri = metaData.uri;
+        }
+      }
+
+      // STEP 2: Create token transaction (Token Service)
+      if (elLoadInfo) elLoadInfo.textContent = "Creating token transaction...";
+      const r = await fetch(`${TOKEN_SERVICE_URL}/api/create-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -161,23 +183,63 @@
           decimals,
           name: tokenName,
           symbol: tokenSymbol,
-          description,
-          metadata_uri: ipfsLogo,
-          priority_fee: 0,          // на devnet не нужен
-          use_token_2022: true
+          metadata_uri: metadataUri,
+          priority_fee: 250000,
+          rpc_url: RPC_URL,
+          charge_to: null,
+          fixed_charge_sol: 0
         }),
       });
 
       const data = await r.json();
       if (!r.ok || !data?.success) {
-        throw new Error(data?.detail || data?.message || "API /api/proceed failed");
+        throw new Error(data?.error || "Token Service /api/create-token failed");
       }
 
-      // Подписываем и шлём
-      if (elLoadInfo) elLoadInfo.textContent = "Sign in wallet and send…";
-      await signAndSendFromApiResponse(data, storedWallet);
-
       const mint = data.mint;
+      const unsignedTxBase64 = data.transaction;
+      const mintKeypairSecret = data.mint_keypair;
+
+      // STEP 3: Sign transaction with wallet
+      if (elLoadInfo) elLoadInfo.textContent = "Sign transaction in your wallet...";
+      
+      const provider = getProvider();
+      const connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
+      
+      // Deserialize transaction
+      const txBuffer = Buffer.from(unsignedTxBase64, "base64");
+      const transaction = solanaWeb3.Transaction.from(txBuffer);
+      
+      // Sign with wallet
+      let signedTx;
+      if (provider.isPhantom) {
+        signedTx = await window.solana.signTransaction(transaction);
+      } else if (provider.isSolflare) {
+        signedTx = await window.solflare.signTransaction(transaction);
+      } else {
+        throw new Error("Unsupported wallet");
+      }
+
+      // STEP 4: Send signed transaction (Token Service)
+      if (elLoadInfo) elLoadInfo.textContent = "Sending transaction to blockchain...";
+      
+      const signedTxBase64 = Buffer.from(signedTx.serialize()).toString("base64");
+      
+      const sendResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signed_transaction: signedTxBase64,
+          rpc_url: RPC_URL
+        }),
+      });
+
+      const sendData = await sendResp.json();
+      if (!sendResp.ok || !sendData?.success) {
+        throw new Error(sendData?.error || "Failed to send transaction");
+      }
+
+      console.log("Transaction signature:", sendData.signature);
       sessionStorage.setItem("token", mint);
 
       // ссылки на devnet

@@ -1,17 +1,11 @@
 # schemas.py
+# Pydantic models for API requests
+
 from typing import Optional, Any, Dict
 from pydantic import BaseModel
 
 
-class ProceedReq(BaseModel):
-    wallet: str
-    decimals: int = 9
-    name: Optional[str] = "Cool Name"
-    symbol: Optional[str] = "CLSMBL"
-    description: Optional[str] = "Cool description"
-    metadata_uri: Optional[str] = ""   # IPFS-лого с фронта
-    priority_fee: int = 250_000
-    use_token_2022: bool = True  # Token-2022 с расширениями
+# DEPRECATED: ProceedReq removed - frontend now uses Token Service directly
 
 
 class ListingReq(BaseModel):

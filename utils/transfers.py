@@ -1,18 +1,40 @@
 from utils.compat import recent_blockhash
 import os
+import struct
 from typing import Dict, Any
 
 from solana.rpc.api import Client
 from solders.system_program import TransferParams, transfer
-from solana.transaction import Transaction
+from solana.transaction import Transaction, TransactionInstruction
+from solana.publickey import PublicKey as SolanaPublicKey
 
 from solders.pubkey import Pubkey as PublicKey
 from utils.compat import recent_blockhash
 
+# ComputeBudget Program ID
+COMPUTE_BUDGET_PROGRAM_ID = SolanaPublicKey("ComputeBudget111111111111111111111111111111")
 
 def add_priority_fee(transaction: Transaction, micro_lamports: int) -> None:
-    # Заглушка (без ComputeBudget)
-    return
+    """
+    Добавляет priority fee через ComputeBudget SetComputeUnitPrice инструкцию.
+    micro_lamports - цена за compute unit в микро-лампортах (1 lamport = 1,000,000 micro-lamports)
+    """
+    if micro_lamports <= 0:
+        return
+    
+    # SetComputeUnitPrice instruction:
+    # discriminator = 3 (u8)
+    # micro_lamports = u64 (little-endian)
+    data = struct.pack("<BQ", 3, micro_lamports)
+    
+    instruction = TransactionInstruction(
+        program_id=COMPUTE_BUDGET_PROGRAM_ID,
+        data=data,
+        keys=[]  # SetComputeUnitPrice не требует аккаунтов
+    )
+    
+    # Добавляем в начало транзакции (ComputeBudget инструкции должны быть первыми)
+    transaction.instructions.insert(0, instruction)
 
 
 def _read_env_pubkey(var_name: str) -> PublicKey:

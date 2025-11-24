@@ -40,7 +40,7 @@ def _extract_blockhash_loose(resp: Any) -> str:
         except Exception:
             pass
 
-    # Попытка через to_json() (часто есть у solders-ответов)
+    # через to_json()
     try:
         to_json = getattr(resp, "to_json", None)
         if callable(to_json):
@@ -58,14 +58,51 @@ def _extract_blockhash_loose(resp: Any) -> str:
 
     raise TypeError(f"Unsupported blockhash response type: {type(resp)!r}")
 
-def recent_blockhash(connection: Any, commitment: Optional[Any] = None) -> str:
+def recent_blockhash(connection: Any, commitment: Optional[Any] = None, max_retries: int = 3) -> str:
     """
     Берёт latest blockhash у RPC и возвращает его строкой.
     ВАЖНО: здесь НЕТ рекурсий — только вызов RPC.
-    """
-    resp = (
-        connection.get_latest_blockhash(commitment)
-        if commitment is not None
-        else connection.get_latest_blockhash()
-    )
-    return _extract_blockhash_loose(resp)
+    retry на 3 попытки"""
+    import time
+    import logging
+    
+    logger = logging.getLogger("uvicorn.error")
+    
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            resp = (
+                connection.get_latest_blockhash(commitment)
+                if commitment is not None
+                else connection.get_latest_blockhash()
+            )
+            return _extract_blockhash_loose(resp)
+        except Exception as e:
+            last_error = e
+            error_type = type(e).__name__
+            error_msg = str(e)
+            is_timeout = (
+                "timeout" in error_msg.lower() 
+                or "TimeoutError" in error_type
+                or "handshake" in error_msg.lower()
+            )
+            
+            if is_timeout and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 0.5  # экспоненциальная задержка
+                logger.warning(
+                    f"RPC get_latest_blockhash timeout (attempt {attempt + 1}/{max_retries}), "
+                    f"retrying in {wait_time:.1f}s... error={error_type}: {error_msg[:100]}"
+                )
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(
+                    f"RPC get_latest_blockhash failed (attempt {attempt + 1}/{max_retries}): "
+                    f"{error_type}: {error_msg[:200]}",
+                    exc_info=not is_timeout  # полный traceback только если не таймаут
+                )
+                if attempt == max_retries - 1:
+                    raise
+    
+    # дошли сюда - все попытки исчерпаны
+    raise RuntimeError(f"Failed to get blockhash after {max_retries} attempts: {last_error}")

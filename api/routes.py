@@ -13,16 +13,12 @@ from solana.publickey import PublicKey
 from solana.transaction import Transaction
 from solana.system_program import TransferParams, transfer
 
-from config import RPC_URL, CHARGE_TO, FIXED_CHARGE_SOL, PINATA_JWT_TOKEN, PINATA_API_KEY, PINATA_SECRET_KEY
-from schemas import ProceedReq, ListingReq
-from utils.token_ops import create_token_transaction
+from config import RPC_URL, CHARGE_TO, FIXED_CHARGE_SOL, PINATA_JWT_TOKEN, PINATA_API_KEY, PINATA_SECRET_KEY, RPC_PROVIDER
+from schemas import ListingReq
 from utils.mint import mint_tokens_transaction, get_mint_info
-from utils.transaction_helpers import (
-    serialize_transaction_b64,
-    ensure_transaction_fields,
-    append_fixed_charge,
-)
+from utils.transaction_helpers import serialize_transaction_b64, ensure_transaction_fields
 from utils.security_funcs import safe_wallet_log, hash_wallet, hash_ip, safe_rpc_url
+from utils.simulation import simulate_transaction, log_simulation_result
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
@@ -30,15 +26,14 @@ router = APIRouter()
 
 @router.post("/api/upload-ipfs")
 async def upload_ipfs(file: UploadFile = File(...)):
-    """Загружает файл на IPFS через Pinata и возвращает URI."""
+    """Загружает файл на IPFS через Pinata и возвращает URI с надежным gateway."""
     try:
         file_content = await file.read()
         file_size = len(file_content)
         if file_size > 5 * 1024 * 1024:  # 5mb limit
             raise HTTPException(status_code=400, detail="File too large (max 5MB)")
         logger.info(f"Uploading file to IPFS: name={file.filename}, size={file_size} bytes")
-
-        # Пробуем сначала v3 API с JWT токеном (предпочтительно)
+        
         if PINATA_JWT_TOKEN:
             form_data = aiohttp.FormData()
             form_data.add_field("file", io.BytesIO(file_content), filename=file.filename, content_type=file.content_type)
@@ -63,9 +58,9 @@ async def upload_ipfs(file: UploadFile = File(...)):
                         logger.error(f"Pinata v3 response: {data}")
                         raise HTTPException(status_code=500, detail="No IPFS hash returned")
                     
-                    ipfs_url = f"https://gateway.pinata.cloud/ipfs/{cid}"
-                    logger.info(f"File uploaded to IPFS (v3): {ipfs_url}")
-                    return {"success": True, "ipfs_url": ipfs_url}
+                    ipfs_url = f"https://ipfs.io/ipfs/{cid}"
+                    logger.info(f"File uploaded to IPFS via Pinata (v3), gateway: {ipfs_url}")
+                    return {"success": True, "ipfs_url": ipfs_url, "provider": "pinata"}
         
         # Fallback на v1 API (legacy)
         elif PINATA_API_KEY and PINATA_SECRET_KEY:
@@ -91,9 +86,10 @@ async def upload_ipfs(file: UploadFile = File(...)):
                     if not ipfs_hash:
                         raise HTTPException(status_code=500, detail="No IPFS hash returned")
                     
-                    ipfs_url = f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}"
-                    logger.info(f"File uploaded to IPFS (v1): {ipfs_url}")
-                    return {"success": True, "ipfs_url": ipfs_url}
+                    # Используем надежный gateway вместо Pinata
+                    ipfs_url = f"https://ipfs.io/ipfs/{ipfs_hash}"
+                    logger.info(f"File uploaded to IPFS via Pinata (v1), gateway: {ipfs_url}")
+                    return {"success": True, "ipfs_url": ipfs_url, "provider": "pinata"}
         else:
             logger.warning("Pinata credentials not configured, IPFS upload disabled")
             raise HTTPException(
@@ -105,6 +101,84 @@ async def upload_ipfs(file: UploadFile = File(...)):
         raise
     except Exception as e:
         logger.error(f"IPFS upload error: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/api/upload-metadata")
+async def upload_metadata(request: Request):
+    """
+    Upload token metadata JSON to Pinata IPFS.
+    Возвращает URI с надежным публичным gateway (ipfs.io).
+    SRP: Python API handles IPFS uploads
+    """
+    try:
+        body = await request.json()
+        name = body.get("name", "")
+        symbol = body.get("symbol", "")
+        description = body.get("description", "") or ""
+        image = body.get("image", "")
+        logger.info(f"Upload metadata: name={name}, symbol={symbol}, description='{description}', image={image[:50] if image else 'empty'}...")
+        
+        # Заменяем любые gateway на надежный для изображения в метаданных
+        if image and "/ipfs/" in image:
+            # Извлекаем CID из любого URL
+            cid = image.split("/ipfs/")[-1].split("?")[0]
+            # Заменяем на надежный публичный gateway
+            image = f"https://ipfs.io/ipfs/{cid}"
+            logger.info(f"Replaced gateway with ipfs.io for image: {image}")
+        
+        metadata = {
+            "name": name,
+            "symbol": symbol,
+            "description": description,
+        }
+        if image:
+            metadata["image"] = image
+        
+        import json as json_lib
+        metadata_json = json_lib.dumps(metadata)
+        metadata_bytes = metadata_json.encode()
+        
+        if PINATA_JWT_TOKEN:
+            form_data = aiohttp.FormData()
+            form_data.add_field(
+                "file",
+                io.BytesIO(metadata_json.encode()),
+                filename="metadata.json",
+                content_type="application/json"
+            )
+            form_data.add_field("network", "public")  # Публичный доступ без пароля
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://uploads.pinata.cloud/v3/files",
+                    headers={"Authorization": f"Bearer {PINATA_JWT_TOKEN}"},
+                    data=form_data
+                ) as response:
+                    if response.status != 200:
+                        text = await response.text()
+                        logger.error(f"Pinata upload failed: {response.status} {text}")
+                        raise HTTPException(status_code=500, detail="IPFS upload failed")
+                    
+                    result = await response.json()
+                    cid = result.get("data", {}).get("cid")
+                    if not cid:
+                        raise HTTPException(status_code=500, detail="No CID returned from Pinata")
+                    
+                    # Заменяем Pinata gateway на более надежный ipfs.io
+                    uri = f"https://ipfs.io/ipfs/{cid}"
+                    logger.info(f"Metadata uploaded to IPFS (public access), gateway: {uri}")
+                    return {"success": True, "uri": uri, "cid": cid}
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="IPFS upload not configured. Set PINATA_JWT_TOKEN."
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Metadata upload error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -122,7 +196,9 @@ def health():
 def get_config():
     return {
         "network": "devnet" if "devnet" in RPC_URL.lower() else "mainnet",
-        "use_proxy": True
+        "use_proxy": True,
+        "charge_to": CHARGE_TO,
+        "fixed_charge_sol": FIXED_CHARGE_SOL,
     }
 
 
@@ -203,86 +279,18 @@ async def send_transaction(request: Request):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/api/proceed")
-async def api_proceed(req: ProceedReq, request: Request):
-    logger.info(f"POST /api/proceed: wallet={safe_wallet_log(req.wallet)}, wallet_hash={hash_wallet(req.wallet)}")
-    logger.info(f"Request data: name={req.name}, symbol={req.symbol}, decimals={req.decimals}, description={req.description[:50] if req.description else 'empty'}")
-    logger.info(f"Request data: metadata_uri={req.metadata_uri[:100] if req.metadata_uri else 'empty'}, priority_fee={req.priority_fee}, use_token_2022={req.use_token_2022}")
-    try:
-        try:
-            PublicKey(req.wallet)
-        except Exception as e:
-            logger.warning(
-                f"Invalid wallet address: wallet={safe_wallet_log(req.wallet)}, "
-                f"wallet_hash={hash_wallet(req.wallet)}, "
-                f"length={len(req.wallet)}, error_type={type(e).__name__}"
-            )
-            raise HTTPException(status_code=400, detail="Invalid request")
-
-        if CHARGE_TO:
-            try:
-                PublicKey(CHARGE_TO)
-            except Exception as e:
-                logger.error(f"Invalid CHARGE_TO configuration: '{CHARGE_TO}', error: {type(e).__name__}: {e}")
-                raise HTTPException(status_code=500, detail="Internal server error")
-
-        conn = Client(RPC_URL)
-        logger.info(f"RPC_URL={RPC_URL}, CHARGE_TO={CHARGE_TO}, FIXED_CHARGE_SOL={FIXED_CHARGE_SOL}")
-
-        logger.info("Calling create_token_transaction with processed parameters")
-        res = await create_token_transaction(
-            connection=conn,
-            wallet=req.wallet,
-            decimals=req.decimals,
-            name=req.name or "",
-            symbol=req.symbol or "",
-            description=req.description or "",
-            metadata_uri=req.metadata_uri or "",
-            priority_fee=req.priority_fee,
-            use_token_2022=req.use_token_2022,
-        )
-        logger.info(f"create_token_transaction result: success={res.get('success')}, mint={res.get('mint', 'N/A')[:16] if res.get('mint') else 'N/A'}...")
-        if not res or not res.get("success"):
-            error_msg = res.get("message", "create_token failed")
-            logger.error(f"create_token_transaction failed: {error_msg}")
-            raise HTTPException(status_code=500, detail="Internal server error")
-
-        tx: Transaction = res["transaction"]
-        logger.info(f"Transaction received: instructions_count={len(tx.instructions)}, fee_payer={tx.fee_payer}")
-
-        ensure_transaction_fields(conn, tx, req.wallet)
-        logger.info(f"After ensure_transaction_fields: instructions_count={len(tx.instructions)}, recent_blockhash={tx.recent_blockhash[:16] if tx.recent_blockhash else 'None'}...")
-        
-        append_fixed_charge(tx, req.wallet)
-        logger.info(f"After append_fixed_charge: instructions_count={len(tx.instructions)}")
-
-        assert tx.fee_payer is not None, "fee_payer is not set"
-        assert tx.recent_blockhash, "recent_blockhash is empty"
-
-        b64 = serialize_transaction_b64(tx)
-        return {
-            "success": True,
-            "tx": b64,
-            "updatedTx": [b64],
-            "mint": res.get("mint"),
-            "seed": res.get("seed"),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            f"Unexpected error in /api/proceed: error_type={type(e).__name__}, "
-            f"wallet_hash={hash_wallet(req.wallet)}",
-            exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Internal server error")
+# DEPRECATED: /api/proceed removed - use Token Service directly from frontend
+# Frontend now calls:
+#   1. POST /api/upload-metadata (Python API) - upload metadata to IPFS
+#   2. POST /api/create-token (Token Service) - create unsigned transaction
+#   3. Sign transaction in wallet
+#   4. POST /api/send-transaction (Token Service) - send signed transaction to RPC
 
 
 @router.post("/api/listing")
 async def api_listing(req: ListingReq):
     logger.info(
-        f"POST /api/listing: wallet={safe_wallet_log(req.wallet) if req.wallet else 'None'}, "
+        f"post /api/listing: wallet={safe_wallet_log(req.wallet) if req.wallet else 'None'}, "
         f"wallet_hash={hash_wallet(req.wallet) if req.wallet else 'none'}, "
         f"amount={req.amount}"
     )
@@ -450,5 +458,4 @@ async def api_listing(req: ListingReq):
 
 
 def setup_routes(limiter):
-    limiter.limit("10/minute")(send_transaction)
-    limiter.limit("30/minute")(api_proceed)
+    limiter.limit("3/minute")(send_transaction)

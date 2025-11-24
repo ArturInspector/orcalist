@@ -3,6 +3,7 @@
 (() => {
   // ========= CONFIG =========
   const RPC_URL = "https://api.devnet.solana.com"; // devnet
+  const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
   // Определяем базовый URL API автоматически.
   // 1) meta[name="api-base"] имеет приоритет
   // 2) если фронт работает на 3000 → шьём :8000 на тот же host
@@ -26,7 +27,8 @@
   })();
 
   // web3 глобаль приходит из <script src="...iife.min.js">
-  const { Connection, PublicKey, Transaction } = window.solanaWeb3;
+  const solanaWeb3 = window.solanaWeb3;
+  const { Connection, PublicKey, Transaction } = solanaWeb3;
 
   // ========= HELPERS =========
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,17 +44,17 @@
     const which = sessionStorage.getItem("walletProvider"); // 'phantom' | 'solflare'
     if (which === "phantom" && window.solana?.isPhantom) {
       if (!window.solana.isConnected) await window.solana.connect();
-      return { name: "phantom", wallet: window.solana };
+      return { name: "phantom", wallet: window.solana, isPhantom: true, isSolflare: false };
     }
     if (which === "solflare" && window.solflare) {
       if (!window.solflare.isConnected) await window.solflare.connect();
-      return { name: "solflare", wallet: window.solflare };
+      return { name: "solflare", wallet: window.solflare, isPhantom: false, isSolflare: true };
     }
     // Фоллбек: если провайдер не выбран — пробуем Phantom
     if (window.solana?.isPhantom) {
       if (!window.solana.isConnected) await window.solana.connect();
       sessionStorage.setItem("walletProvider", "phantom");
-      return { name: "phantom", wallet: window.solana };
+      return { name: "phantom", wallet: window.solana, isPhantom: true, isSolflare: false };
     }
     throw new Error("Wallet is not connected (phantom/solflare).");
   }
@@ -153,6 +155,32 @@
     return `${addr.slice(0, 5)}...${addr.slice(-5)}`;
   }
 
+  // Проверка незавершенного процесса при загрузке страницы
+  function checkIncompleteTokenCreation() {
+    try {
+      const stateStr = sessionStorage.getItem("tokenCreationState");
+      if (!stateStr) return false;
+      
+      const state = JSON.parse(stateStr);
+      if (!state.mint || !state.mintSecretKey) return false;
+      
+      // Показываем предупреждение о незавершенном процессе
+      if (elLoadInfo) {
+        elLoadInfo.style.display = "flex";
+        elLoadInfo.textContent = `⚠️ Unfinished token creation detected. Mint: ${short(state.mint)}. Click "Create Token" to continue.`;
+        elLoadInfo.style.color = "#ff9900";
+      }
+      
+      return true;
+    } catch (error) {
+      console.error("Error checking incomplete token creation:", error);
+      return false;
+    }
+  }
+
+  // Проверяем при загрузке страницы
+  checkIncompleteTokenCreation();
+
   // CREATE TOKEN
   async function onCreateToken() {
     try {
@@ -160,48 +188,254 @@
       elCreateBtn.disabled = true;
       if (elLoadInfo) {
         elLoadInfo.style.display = "flex";
+        elLoadInfo.style.color = ""; // Сбрасываем цвет предупреждения
         elLoadInfo.textContent = "Preparing transaction…";
+      }
+      
+      // Проверяем, есть ли незавершенный процесс
+      const stateStr = sessionStorage.getItem("tokenCreationState");
+      if (stateStr) {
+        const savedState = JSON.parse(stateStr);
+        if (savedState.step === "first_tx_sent" || savedState.step === "metadata_uploaded") {
+          // Продолжаем с того места, где остановились
+          console.log("🔄 Resuming incomplete token creation from step:", savedState.step);
+          // Можно добавить логику восстановления здесь, но пока просто очищаем и начинаем заново
+          // sessionStorage.removeItem("tokenCreationState");
+        }
       }
 
       const storedWallet = sessionStorage.getItem("walletAddress");
       if (!storedWallet) throw new Error("Connect wallet first.");
 
-      // БАЗОВЫЕ ПОЛЯ
       const decimals = Number(document.getElementById("decimals")?.value || 9);
-      const tokenName = document.getElementById("tokenName")?.value || "Token";
-      const tokenSymbol = document.getElementById("tokenSymbol")?.value || "TKN";
+      const tokenName = document.getElementById("tokenName")?.value || "";
+      const tokenSymbol = document.getElementById("tokenSymbol")?.value || "";
       const description = document.getElementById("description")?.value || "";
+      console.log("[onCreateToken] Description from form:", description);
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
 
-      // Вызов бэка — он собирает транзу (создание + фикс-чардж)
-      const r = await fetch(`${API_BASE}/api/proceed`, {
+      // Валидация: проверяем, что name и symbol не пустые
+      if (!tokenName || !tokenName.trim()) {
+        throw new Error("Token name is required");
+      }
+      if (!tokenSymbol || !tokenSymbol.trim()) {
+        throw new Error("Token symbol is required");
+      }
+
+      // Сохраняем значения для использования в обоих шагах
+      const savedTokenName = tokenName.trim();
+      const savedTokenSymbol = tokenSymbol.trim();
+      const savedIpfsLogo = ipfsLogo;
+
+      const connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
+      const provider = await getProvider();
+
+      // Получаем конфиг с fixed_charge
+      let chargeTo = null;
+      let fixedChargeSol = 0;
+      try {
+        const configResp = await fetch(`${API_BASE}/api/config`);
+        if (configResp.ok) {
+          const config = await configResp.json();
+          chargeTo = config.charge_to || null;
+          fixedChargeSol = config.fixed_charge_sol || 0;
+          console.log(`[Config] charge_to: ${chargeTo}, fixed_charge_sol: ${fixedChargeSol}`);
+        }
+      } catch (error) {
+        console.warn("Failed to fetch config, continuing without fixed_charge:", error);
+      }
+
+      // ========= STEP 1: Create base Token-2022 (no extensions) =========
+      if (elLoadInfo) elLoadInfo.textContent = "Step 1/3: Creating base token...";
+      
+      const createResp = await fetch(`${TOKEN_SERVICE_URL}/api/create-token-metaplex`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet: storedWallet,
+          name: savedTokenName,
+          symbol: savedTokenSymbol,
           decimals,
-          name: tokenName,
-          symbol: tokenSymbol,
-          description,
-          metadata_uri: ipfsLogo,
-          priority_fee: 0,          // на devnet не нужен
-          use_token_2022: true  // Token-2022 с расширениями
+          image_uri: savedIpfsLogo,
+          priority_fee: 250000,
+          rpc_url: RPC_URL,
+          charge_to: chargeTo,
+          fixed_charge_sol: fixedChargeSol,
         }),
       });
 
-      const data = await r.json();
-      if (!r.ok || !data?.success) {
-        throw new Error(data?.detail || data?.message || "API /api/proceed failed");
+      const createData = await createResp.json();
+      if (!createResp.ok || !createData?.success) {
+        throw new Error(createData?.error || "Failed to create base token");
       }
 
-      // Подписываем и шлём
-      if (elLoadInfo) elLoadInfo.textContent = "Sign in wallet and send…";
-      await signAndSendFromApiResponse(data, storedWallet);
+      const mint = createData.mint;
+      const mintSecretKey = createData.mintSecretKey;
+      
+      // Сохраняем состояние для восстановления при перезагрузке страницы
+      sessionStorage.setItem("tokenCreationState", JSON.stringify({
+        step: "token_created",
+        mint: mint,
+        mintSecretKey: mintSecretKey,
+        tokenName: savedTokenName,
+        tokenSymbol: savedTokenSymbol,
+        ipfsLogo: savedIpfsLogo,
+        description: description,
+        decimals: decimals,
+      }));
+      
+      console.log("✅ Base token created (unsigned):", mint);
 
-      const mint = data.mint;
+      // Sign & send first transaction
+      if (elLoadInfo) elLoadInfo.textContent = "Sign first transaction (create token)...";
+      
+      const tx1Bytes = b64ToBytes(createData.transaction);
+      const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
+      
+      // Обновляем blockhash перед подписью (может устареть между созданием и подписью)
+      const { blockhash } = await connection.getLatestBlockhash("finalized");
+      tx1.recentBlockhash = blockhash;
+      
+      const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
+      tx1.partialSign(mintKeypair);
+        
+      const signedTx1 = await provider.wallet.signTransaction(tx1);
+      
+      if (elLoadInfo) elLoadInfo.textContent = "Sending first transaction...";
+      
+      let binary1 = '';
+      const signedTx1Bytes = signedTx1.serialize();
+      for (let i = 0; i < signedTx1Bytes.length; i++) {
+        binary1 += String.fromCharCode(signedTx1Bytes[i]);
+      }
+      const signedTx1Base64 = btoa(binary1);
+      
+      const send1Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signed_transaction: signedTx1Base64,
+          rpc_url: RPC_URL,
+        }),
+      });
+
+      const send1Data = await send1Resp.json();
+      if (!send1Resp.ok || !send1Data?.success) {
+        throw new Error(send1Data?.error || "Failed to send first transaction");
+      }
+
+      console.log("✅ First transaction sent:", send1Data.signature);
+      
+      // Обновляем состояние - первая транзакция отправлена
+      const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
+      currentState.step = "first_tx_sent";
+      currentState.tx1Signature = send1Data.signature;
+      sessionStorage.setItem("tokenCreationState", JSON.stringify(currentState));
+      
+      await sleep(1000); // wait for confirmation
+
+      // ========= STEP 2: Upload metadata JSON to IPFS =========
+      let metadataUri = "";
+      if (elLoadInfo) elLoadInfo.textContent = "Step 2/3: Uploading metadata JSON to IPFS...";
+      
+      // Всегда загружаем метаданные JSON (даже без изображения)
+      const metaResp = await fetch(`${API_BASE}/api/upload-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: savedTokenName,
+          symbol: savedTokenSymbol,
+          description: description,
+          image: savedIpfsLogo || "" // Может быть пустым
+        }),
+      });
+      
+      const metaData = await metaResp.json();
+      if (metaResp.ok && metaData?.uri) {
+        metadataUri = metaData.uri;
+        console.log("✅ Metadata JSON uploaded to IPFS:", metadataUri);
+        
+        // Обновляем состояние - метаданные загружены
+        const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
+        currentState.step = "metadata_uploaded";
+        currentState.metadataUri = metadataUri;
+        sessionStorage.setItem("tokenCreationState", JSON.stringify(currentState));
+      } else {
+        console.warn("⚠️ Failed to upload metadata JSON, continuing without URI");
+      }
+
+      // ========= STEP 3: Add Metaplex metadata =========
+      if (elLoadInfo) elLoadInfo.textContent = "Step 3/3: Adding metadata to token...";
+      
+      // Повторная валидация перед шагом 3 (на случай, если значения изменились)
+      if (!savedTokenName || !savedTokenSymbol) {
+        throw new Error("Token name and symbol are required for metadata");
+      }
+      
+      const metadataResp = await fetch(`${TOKEN_SERVICE_URL}/api/add-metaplex-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mint: mint,
+          mint_secret_key: mintSecretKey,
+          payer: storedWallet,
+          name: savedTokenName,
+          symbol: savedTokenSymbol,
+          uri: metadataUri, // URI JSON метаданных, а не изображения напрямую
+          rpc_url: RPC_URL,
+        }),
+      });
+
+      const metadataData = await metadataResp.json();
+      if (!metadataResp.ok || !metadataData?.success) {
+        throw new Error(metadataData?.error || "Failed to create metadata transaction");
+      }
+
+      console.log("✅ Metadata transaction created (unsigned)");
+
+      // Sign & send second transaction
+      if (elLoadInfo) elLoadInfo.textContent = "Sign second transaction (add metadata)...";
+      
+      const tx2Bytes = b64ToBytes(metadataData.transaction);
+      const tx2 = solanaWeb3.Transaction.from(tx2Bytes);
+      
+      // Обновляем blockhash перед подписью (может устареть между созданием и подписью)
+      const { blockhash: blockhash2 } = await connection.getLatestBlockhash("finalized");
+      tx2.recentBlockhash = blockhash2;
+      
+      const signedTx2 = await provider.wallet.signTransaction(tx2);
+      
+      if (elLoadInfo) elLoadInfo.textContent = "Sending second transaction...";
+      
+      let binary2 = '';
+      const signedTx2Bytes = signedTx2.serialize();
+      for (let i = 0; i < signedTx2Bytes.length; i++) {
+        binary2 += String.fromCharCode(signedTx2Bytes[i]);
+      }
+      const signedTx2Base64 = btoa(binary2);
+      
+      const send2Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signed_transaction: signedTx2Base64,
+          rpc_url: RPC_URL,
+        }),
+      });
+
+      const send2Data = await send2Resp.json();
+      if (!send2Resp.ok || !send2Data?.success) {
+        throw new Error(send2Data?.error || "Failed to send second transaction");
+      }
+
+      console.log("✅ Second transaction sent:", send2Data.signature);
+      console.log("🎉 Token created with Metaplex metadata!");
+      
+
+      sessionStorage.removeItem("tokenCreationState");
       sessionStorage.setItem("token", mint);
 
-      // ссылки на devnet
+      // devnet links
       if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=devnet`;
       if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=devnet`;
       if (elModalAddress) elModalAddress.textContent = short(mint);
