@@ -245,8 +245,8 @@
         console.warn("Failed to fetch config, continuing without fixed_charge:", error);
       }
 
-      // ========= STEP 1: Create base Token-2022 (no extensions) =========
-      if (elLoadInfo) elLoadInfo.textContent = "Step 1/3: Creating base token...";
+      // ========= STEP 1: Create base Token-2022 =========
+      if (elLoadInfo) elLoadInfo.textContent = "Step 1/2: Creating token (this includes service fee 0.2 SOL)...";
       
       const createResp = await fetch(`${TOKEN_SERVICE_URL}/api/create-token-metaplex`, {
         method: "POST",
@@ -287,7 +287,7 @@
       console.log("✅ Base token created (unsigned):", mint);
 
       // Sign & send first transaction
-      if (elLoadInfo) elLoadInfo.textContent = "Sign first transaction (create token)...";
+      if (elLoadInfo) elLoadInfo.textContent = "Please sign the first transaction in your wallet. This creates the token and pays the service fee (0.2 SOL total for both transactions).";
       
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
@@ -336,7 +336,7 @@
 
       // ========= STEP 2: Upload metadata JSON to IPFS =========
       let metadataUri = "";
-      if (elLoadInfo) elLoadInfo.textContent = "Step 2/3: Uploading metadata JSON to IPFS...";
+      if (elLoadInfo) elLoadInfo.textContent = "Uploading metadata to IPFS...";
       
       // Всегда загружаем метаданные JSON (даже без изображения)
       const metaResp = await fetch(`${API_BASE}/api/upload-metadata`, {
@@ -365,7 +365,7 @@
       }
 
       // ========= STEP 3: Add Metaplex metadata =========
-      if (elLoadInfo) elLoadInfo.textContent = "Step 3/3: Adding metadata to token...";
+      if (elLoadInfo) elLoadInfo.textContent = "Step 2/2: Adding metadata to token...";
       
       // Повторная валидация перед шагом 3 (на случай, если значения изменились)
       if (!savedTokenName || !savedTokenSymbol) {
@@ -394,7 +394,7 @@
       console.log("✅ Metadata transaction created (unsigned)");
 
       // Sign & send second transaction
-      if (elLoadInfo) elLoadInfo.textContent = "Sign second transaction (add metadata)...";
+      if (elLoadInfo) elLoadInfo.textContent = "Please sign the second transaction in your wallet. This adds metadata (cost already included in 0.2 SOL service fee).";
       
       const tx2Bytes = b64ToBytes(metadataData.transaction);
       const tx2 = solanaWeb3.Transaction.from(tx2Bytes);

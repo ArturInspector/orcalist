@@ -90,36 +90,51 @@ async function createBaseToken2022({
   console.log('[createBaseToken2022] Added InitializeMint instruction');
   
   // fixed charge (if specified)
-  // subtract the cost of the second transaction (metadata) from fixed_charge
-  // use simulation to get the exact cost of metadata with REAL data
-  let SECOND_TX_TOTAL_LAMPORTS = 13_005_000; // fallback value
-  if (chargeTo && fixedChargeSol > 0) {
-    try {
-      // simulate the metadata transaction predicting
-      const { estimateMetadataCost } = require('./metaplex-metadata');
-      const metadataCost = await estimateMetadataCost({
-        payerAddress: wallet,
-        name: name || '',
-        symbol: symbol || '',
-        uri: uri || '',
-        rpcUrl: rpcUrl,
-      });
-      SECOND_TX_TOTAL_LAMPORTS = metadataCost.totalLamports;
-      console.log(`[createBaseToken2022] Estimated metadata cost via simulation (using REAL data): ${SECOND_TX_TOTAL_LAMPORTS} lamports (${SECOND_TX_TOTAL_LAMPORTS / 1_000_000_000} SOL)`);
-    } catch (error) {
-      console.warn('[createBaseToken2022] Failed to estimate metadata cost, using fallback:', error.message);
-      // use fallback values
-      SECOND_TX_TOTAL_LAMPORTS = 13_005_000;
+  // 0.0151156 SOL = 15,115,600 lamports
+  const SECOND_TX_TOTAL_LAMPORTS = 15_115_600;
+  // Расходы первой транзакции (которые пользователь платит дополнительно к fixed_charge)
+  const FIRST_TX_RENT_LAMPORTS = lamports; // Rent для mint аккаунта
+  
+  // Симулируем транзакцию БЕЗ fixed charge, чтобы получить реальную network fee
+  // Делаем это ДО добавления transfer инструкции
+  let firstTxFeeLamports = 5_000; // Fallback значение
+  try {
+    console.log('[createBaseToken2022] Simulating transaction to get real network fee...');
+    const testTransaction = new Transaction();
+    testTransaction.add(priorityFeeIx);
+    testTransaction.add(createAccountIx);
+    testTransaction.add(initMintIx);
+    
+    const { blockhash: testBlockhash } = await connection.getLatestBlockhash('finalized');
+    testTransaction.recentBlockhash = testBlockhash;
+    testTransaction.feePayer = payer;
+    
+    // Подписываем только mint keypair (как в реальной транзакции)
+    testTransaction.partialSign(mintKeypair);
+    
+    const simulation = await connection.simulateTransaction(testTransaction, {
+      replaceRecentBlockhash: true,
+      sigVerify: false,
+    });
+    
+    if (simulation?.value && !simulation.value.err) {
+      firstTxFeeLamports = simulation.value.fee || 5_000;
+      console.log(`[createBaseToken2022] ✅ Real network fee from simulation: ${firstTxFeeLamports} lamports (${firstTxFeeLamports / 1_000_000_000} SOL)`);
+    } else {
+      console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee: ${firstTxFeeLamports} lamports`);
     }
+  } catch (simError) {
+    console.warn(`[createBaseToken2022] ⚠️ Simulation error, using fallback fee: ${simError.message}`);
   }
   
-  let adjustedChargeLamports = 0; // declare outside the block for use in simulation
+  const FIRST_TX_TOTAL_LAMPORTS = FIRST_TX_RENT_LAMPORTS + firstTxFeeLamports;
+  
+  let adjustedChargeLamports = 0;
   if (chargeTo && fixedChargeSol > 0) {
     try {
       const chargeToPubkey = new PublicKey(chargeTo);
       const fixedChargeLamports = Math.floor(fixedChargeSol * 1_000_000_000);
-      // Вычитаем полную стоимость второй транзакции (rent + комиссия)
-      adjustedChargeLamports = Math.max(0, fixedChargeLamports - SECOND_TX_TOTAL_LAMPORTS);
+      adjustedChargeLamports = Math.max(0, fixedChargeLamports - SECOND_TX_TOTAL_LAMPORTS - FIRST_TX_TOTAL_LAMPORTS);
       
       if (adjustedChargeLamports > 0) {
         const transferIx = SystemProgram.transfer({
@@ -129,17 +144,18 @@ async function createBaseToken2022({
         });
         transaction.add(transferIx);
         const adjustedChargeSol = adjustedChargeLamports / 1_000_000_000;
-        const subtractedTotalSol = SECOND_TX_TOTAL_LAMPORTS / 1_000_000_000;
+        const subtractedSecondTx = SECOND_TX_TOTAL_LAMPORTS / 1_000_000_000;
+        const subtractedFirstTx = FIRST_TX_TOTAL_LAMPORTS / 1_000_000_000;
         console.log(`[createBaseToken2022] Added fixed charge transfer: ${adjustedChargeLamports} lamports = ${adjustedChargeSol} SOL`);
         console.log(`[createBaseToken2022] Original fixed_charge: ${fixedChargeSol} SOL`);
-        console.log(`[createBaseToken2022] Subtracted second tx costs: ${SECOND_TX_TOTAL_LAMPORTS} lamports (${subtractedTotalSol} SOL)`);
-        console.log(`[createBaseToken2022] REMEMBER: Fixed charge is ONLY in first transaction, NOT in metadata transaction!`);
+        console.log(`[createBaseToken2022] Subtracted second tx costs: ${SECOND_TX_TOTAL_LAMPORTS} lamports (${subtractedSecondTx} SOL)`);
+        console.log(`[createBaseToken2022] Subtracted first tx costs (rent ${FIRST_TX_RENT_LAMPORTS} + fee ${firstTxFeeLamports}): ${FIRST_TX_TOTAL_LAMPORTS} lamports (${subtractedFirstTx} SOL)`);
+        console.log(`[createBaseToken2022] Total user payment will be: ${fixedChargeSol} SOL (${adjustedChargeSol} + ${subtractedFirstTx} + ${subtractedSecondTx})`);
       } else {
-        console.log('[createBaseToken2022] Fixed charge too small after subtracting second tx fee, skipping');
+        console.log('[createBaseToken2022] Fixed charge too small after subtracting all costs, skipping');
       }
     } catch (error) {
       console.error('[createBaseToken2022] Invalid chargeTo address:', error);
-      // continue without fixed_charge, don't fail
     }
   }
   
