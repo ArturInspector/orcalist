@@ -7,6 +7,7 @@ const {
 const { createSimpleToken } = require('../utils/transaction-simple');
 const { createBaseToken2022 } = require('../utils/transaction-base');
 const { addMetaplexMetadata, revokeUpdateAuthority } = require('../utils/metaplex-metadata');
+const { createRevokeTransactions } = require('../utils/revoke-authority');
 
 router.post('/create-simple-token', async (req, res) => {
   try {
@@ -255,7 +256,7 @@ router.post('/add-metaplex-metadata', async (req, res) => {
 
 router.post('/revoke-update-authority', async (req, res) => {
   try {
-    const { mint, payer, rpc_url = 'https://api.devnet.solana.com' } = req.body;
+    const { mint, payer, rpc_url = 'https://api.devnet.solana.com', charge_to = null } = req.body;
 
     if (!mint || !payer) {
       return res.status(400).json({ 
@@ -268,6 +269,7 @@ router.post('/revoke-update-authority', async (req, res) => {
       mintAddress: mint,
       payerAddress: payer,
       rpcUrl: rpc_url,
+      chargeTo: charge_to,
     });
 
     res.json(result);
@@ -277,6 +279,62 @@ router.post('/revoke-update-authority', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// POST /api/revoke-authority
+// Creates revoke authority transactions for mint and/or freeze authority
+router.post('/revoke-authority', async (req, res) => {
+  try {
+    const {
+      wallet,
+      mint_address,
+      revoke_mint = false,
+      revoke_freeze = false,
+      priority_fee = 250000,
+      rpc_url = 'https://api.devnet.solana.com',
+      charge_to = null,
+    } = req.body;
+
+    if (!wallet || !mint_address) {
+      return res.status(400).json({
+        success: false,
+        error: 'Wallet and mint_address are required',
+      });
+    }
+
+    if (!revoke_mint && !revoke_freeze) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one revoke (mint or freeze) must be requested',
+      });
+    }
+
+    console.log('[revoke-authority] Request:', {
+      wallet,
+      mint_address,
+      revoke_mint,
+      revoke_freeze,
+      priority_fee,
+    });
+
+    const result = await createRevokeTransactions({
+      wallet,
+      mintAddress: mint_address,
+      revokeMint: revoke_mint,
+      revokeFreeze: revoke_freeze,
+      priorityFee: priority_fee,
+      rpcUrl: rpc_url,
+      chargeTo: charge_to,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('[revoke-authority] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 });

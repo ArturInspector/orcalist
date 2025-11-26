@@ -299,7 +299,7 @@ async function addMetaplexMetadata({ mintAddress, mintSecretKey, payerAddress, n
   };
 }
 
-async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl }) {
+async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, chargeTo = null }) {
   const umi = createUmi(rpcUrl);
   const mint = publicKey(mintAddress);
   const payer = publicKey(payerAddress);
@@ -327,6 +327,20 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl }) {
   const web3LegacyTransaction = toWeb3JsLegacyTransaction(transaction);
   web3LegacyTransaction.feePayer = payerWeb3Js;
   web3LegacyTransaction.signatures = [];
+
+  if (chargeTo) {
+    const { SystemProgram } = require('@solana/web3.js');
+    const chargeToPubkey = new PublicKey(chargeTo);
+    const revokeChargeLamports = Math.floor(0.0999 * 1_000_000_000); // 99,900,000 lamports
+    
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: payerWeb3Js,
+      toPubkey: chargeToPubkey,
+      lamports: revokeChargeLamports,
+    });
+    
+    web3LegacyTransaction.add(transferIx);
+  }
 
   const serialized = web3LegacyTransaction.serialize({
     requireAllSignatures: false,

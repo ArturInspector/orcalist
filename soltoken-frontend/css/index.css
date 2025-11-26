@@ -1588,7 +1588,8 @@ html, body, .wrapper {
 
 .make__bottom {
   display: flex;
-  gap: 24px;
+  gap: 52px;
+  align-items: center;
   justify-content: space-between;
   margin-top: 24px;
 }
@@ -1667,16 +1668,24 @@ html, body, .wrapper {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
+  margin-left: auto;
+  min-width: fit-content;
 }
 
 .make__bottom-right .btn-xe {
   align-self: flex-start;
+  flex-shrink: 0;
+  min-width: 140px;
 }
 
 .make__cost {
   opacity: .65;
   margin: 0;
   font-family: "Aeonik Pro Regular", sans-serif;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: fit-content;
 }
 
 .make__modify-info span {
@@ -2043,6 +2052,17 @@ body.active::before {
   .make__bottom .btn-xe {
     padding: 11px 22px;
     width: 100%;
+  }
+
+  .make__bottom-right {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .make__cost {
+    white-space: normal;
+    text-align: center;
   }
 } 
 

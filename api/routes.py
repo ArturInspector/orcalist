@@ -476,7 +476,7 @@ async def revoke_all(request: Request):
             raise HTTPException(status_code=400, detail="At least one revoke required")
 
         revoke_count = sum([revoke_mint, revoke_freeze, revoke_update])
-        revoke_cost = revoke_count * 0.1
+        revoke_cost = revoke_count * 0.0999 
         logger.info(
             f"post /api/revoke-all: wallet={safe_wallet_log(wallet) if wallet else 'None'}, "
             f"wallet_hash={hash_wallet(wallet) if wallet else 'none'}, "
@@ -486,47 +486,81 @@ async def revoke_all(request: Request):
         )
 
         conn = Client(RPC_URL)
+        logger.info(f"checking mint account: mint={mint_address}")
         mint_info = await get_mint_info(conn, mint_address)
+        logger.info(f"get_mint_info result: success={mint_info.get('success')}, message={mint_info.get('message')}, mint={mint_address[:8]}...")
         if not mint_info.get("success"):
-            raise HTTPException(status_code=400, detail="Mint not found")
+            error_msg = mint_info.get("message", "Mint not found")
+            logger.warning(f"Mint not found: mint={mint_address}, message={error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
 
-        use_token_2022 = mint_info.get("use_token_2022", True)
         transactions = []
+        token_service_url = os.getenv("TOKEN_SERVICE_URL", "http://localhost:3001")
 
         if revoke_mint or revoke_freeze:
             try:
-                logger.info(f"Creating revoke transactions: mint={revoke_mint}, freeze={revoke_freeze}, use_token_2022={use_token_2022}")
-                result = await create_revoke_transactions(
-                    conn, wallet, mint_address, revoke_mint, revoke_freeze,
-                    priority_fee, use_token_2022
-                )
-                logger.info(f"create_revoke_transactions result: success={result.get('success')}, message={result.get('message')}, transactions_count={len(result.get('transactions', []))}")
-                if not result.get("success"):
-                    raise HTTPException(status_code=500, detail=result.get("message"))
-                for tx in result.get("transactions", []):
-                    try:
-                        tx_b64 = serialize_transaction_b64(tx)
-                        transactions.append(tx_b64)
-                    except Exception as e:
-                        logger.error(f"Error serializing revoke transaction: {type(e).__name__}: {e}", exc_info=True)
-                        raise HTTPException(status_code=500, detail=f"Error serializing transaction: {e}")
+                logger.info(f"Calling Token Service for revoke: mint={revoke_mint}, freeze={revoke_freeze}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{token_service_url}/api/revoke-authority",
+                        json={
+                            "wallet": wallet,
+                            "mint_address": mint_address,
+                            "revoke_mint": revoke_mint,
+                            "revoke_freeze": revoke_freeze,
+                            "priority_fee": priority_fee,
+                            "rpc_url": RPC_URL,
+                            "charge_to": CHARGE_TO,
+                        },
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            logger.error(f"Token Service revoke-authority failed: {resp.status}, {error_text}")
+                            raise HTTPException(status_code=500, detail=f"Token Service error: {error_text}")
+                        
+                        data = await resp.json()
+                        if not data.get("success"):
+                            error_msg = data.get("error", "Token Service returned error")
+                            logger.error(f"Token Service revoke-authority error: {error_msg}")
+                            raise HTTPException(status_code=500, detail=error_msg)
+                        
+                        # Добавляем транзакции от Token Service
+                        service_transactions = data.get("transactions", [])
+                        logger.info(f"Token Service returned {len(service_transactions)} transactions")
+                        transactions.extend(service_transactions)
             except HTTPException:
                 raise
             except Exception as e:
-                logger.error(f"Error in revoke_mint/freeze block: {type(e).__name__}: {e}", exc_info=True)
-                raise
+                logger.error(f"Error calling Token Service for revoke: {type(e).__name__}: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Error calling Token Service: {str(e)}")
 
+        # Revoke update authority через Token Service (Metaplex)
         if revoke_update:
-            token_service_url = os.getenv("TOKEN_SERVICE_URL", "http://localhost:3001")
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{token_service_url}/api/revoke-update-authority",
-                    json={"mint": mint_address, "payer": wallet, "rpc_url": RPC_URL}
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success") and data.get("transaction"):
-                            transactions.append(data["transaction"])
+            try:
+                logger.info(f"Calling Token Service for revoke-update-authority")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{token_service_url}/api/revoke-update-authority",
+                        json={
+                            "mint": mint_address,
+                            "payer": wallet,
+                            "rpc_url": RPC_URL,
+                            "charge_to": CHARGE_TO
+                        },
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("success") and data.get("transaction"):
+                                transactions.append(data["transaction"])
+                                logger.info("Added revoke-update-authority transaction")
+                        else:
+                            error_text = await resp.text()
+                            logger.error(f"Token Service revoke-update-authority failed: {resp.status}, {error_text}")
+            except Exception as e:
+                logger.error(f"Error calling Token Service for revoke-update-authority: {type(e).__name__}: {e}", exc_info=True)
+                # Не прерываем выполнение - revoke update не критичен
 
         logger.info(
             f"revoke-all completed: mint={mint_address[:8] if mint_address else 'None'}..., "

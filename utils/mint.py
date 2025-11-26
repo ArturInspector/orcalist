@@ -1,6 +1,7 @@
 from utils.compat import recent_blockhash
 from decimal import Decimal
 from typing import Dict, Any
+import logging
 
 from solana.rpc.api import Client
 from solana.transaction import Transaction
@@ -20,9 +21,11 @@ from utils.transfers import add_priority_fee
 TOKEN_2022_PROGRAM_ID = PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
 
 
+logger = logging.getLogger("uvicorn.error")
 async def get_mint_info(connection: Client, mint_address: str) -> Dict[str, Any]:
     try:
         mint_pubkey = PublicKey(mint_address)
+        logger.debug(f"get_mint_info: requesting account info for mint={mint_address[:8]}...")
         resp = connection.get_account_info(mint_pubkey)
         account_info = None
         
@@ -33,7 +36,10 @@ async def get_mint_info(connection: Client, mint_address: str) -> Dict[str, Any]
         elif isinstance(resp, dict):
             account_info = resp.get('result', {}).get('value')
         
+        logger.debug(f"get_mint_info: account_info is None={account_info is None}, resp_type={type(resp)}")
+        
         if not account_info:
+            logger.warning(f"get_mint_info: Mint account not found: mint={mint_address[:8]}..., resp={resp}")
             return {
                 "success": False, 
                 "message": "Mint account not found on blockchain. Make sure token creation transaction was sent and confirmed."
@@ -62,6 +68,7 @@ async def get_mint_info(connection: Client, mint_address: str) -> Dict[str, Any]
             owner = PublicKey(owner)
         use_token_2022 = str(owner) == str(TOKEN_2022_PROGRAM_ID) if owner else False
         
+        logger.info(f"get_mint_info: success for mint={mint_address[:8]}..., decimals={decimals}, token_2022={use_token_2022}")
         return {
             "success": True,
             "decimals": decimals,
@@ -69,6 +76,7 @@ async def get_mint_info(connection: Client, mint_address: str) -> Dict[str, Any]
             "use_token_2022": use_token_2022
         } # возвращаем decimals, program_id и use_token_2022
     except Exception as e:
+        logger.error(f"get_mint_info: exception for mint={mint_address[:8] if mint_address else 'None'}..., error={type(e).__name__}: {e}", exc_info=True)
         return {"success": False, "message": f"Error getting mint info: {e}"}
 
 

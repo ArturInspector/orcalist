@@ -4,6 +4,7 @@ venv/
 requirements-dev.txt
 pytest.ini
 .env.devnet
+main.env
 __pycache__/
 test.md
 MAIN_PIPELINES.md

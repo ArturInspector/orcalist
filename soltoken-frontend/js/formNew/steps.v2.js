@@ -161,13 +161,20 @@
 
   function updateCost() {
     const baseCost = 0.2;
-    const revokeCost = (revokeState.freeze ? 0.1 : 0) + 
-                      (revokeState.mint ? 0.1 : 0) + 
-                      (revokeState.update ? 0.1 : 0);
-    const total = baseCost + revokeCost;
+    const revokeCostReal = (revokeState.freeze ? 0.0999 : 0) + 
+                           (revokeState.mint ? 0.0999 : 0) + 
+                           (revokeState.update ? 0.0999 : 0);
+    const revokeCostDisplay = (revokeState.freeze ? 0.1 : 0) + 
+                              (revokeState.mint ? 0.1 : 0) + 
+                              (revokeState.update ? 0.1 : 0);
+    const total = baseCost + revokeCostDisplay;
     
     if (elTotalCost) {
-      elTotalCost.textContent = `Cost: ${total.toFixed(1)} SOL`;
+      if (revokeCostDisplay > 0) {
+        elTotalCost.textContent = `Cost: ${baseCost.toFixed(1)} SOL + ${revokeCostDisplay.toFixed(1)} SOL (revokes) = ${total.toFixed(1)} SOL`;
+      } else {
+        elTotalCost.textContent = `Cost: ${total.toFixed(1)} SOL`;
+      }
       elTotalCost.style.display = "block";
     }
   }
@@ -281,21 +288,21 @@
         console.warn("Failed to fetch config, continuing without fixed_charge:", error);
       }
 
-      // Рассчитываем стоимость revokes и добавляем к fixedChargeSol
-      const revokeCost = (revokeState.freeze ? 0.1 : 0) + 
-                         (revokeState.mint ? 0.1 : 0) + 
-                         (revokeState.update ? 0.1 : 0);
-      const baseFixedCharge = fixedChargeSol;
-      fixedChargeSol = fixedChargeSol + revokeCost;
+      const revokeCostReal = (revokeState.freeze ? 0.0999 : 0) + 
+                             (revokeState.mint ? 0.0999 : 0) + 
+                             (revokeState.update ? 0.0999 : 0);
+      const revokeCostDisplay = (revokeState.freeze ? 0.1 : 0) + 
+                                (revokeState.mint ? 0.1 : 0) + 
+                                (revokeState.update ? 0.1 : 0);
       
-      if (revokeCost > 0) {
-        console.log(`[Revokes] Adding ${revokeCost.toFixed(1)} SOL for revokes (freeze: ${revokeState.freeze}, mint: ${revokeState.mint}, update: ${revokeState.update})`);
-        console.log(`[Config] Total fixed_charge_sol: ${fixedChargeSol.toFixed(1)} SOL (base: ${baseFixedCharge.toFixed(1)} + revokes: ${revokeCost.toFixed(1)})`);
+      if (revokeCostReal > 0) {
+        console.log(`[Revokes] Will charge ${revokeCostReal.toFixed(4)} SOL separately for revokes (freeze: ${revokeState.freeze}, mint: ${revokeState.mint}, update: ${revokeState.update})`);
       }
 
-      // ========= STEP 1: Create base Token-2022 =========
-      const revokeText = revokeCost > 0 ? ` (includes ${revokeCost.toFixed(1)} SOL for revokes)` : '';
-      if (elLoadInfo) elLoadInfo.textContent = `Step 1/2: Creating token (this includes service fee ${fixedChargeSol.toFixed(1)} SOL${revokeText})...`;
+    if (elLoadInfo) {
+        const revokeText = revokeCostDisplay > 0 ? ` (revokes will be charged separately: ${revokeCostDisplay.toFixed(1)} SOL)` : '';
+        elLoadInfo.textContent = `Step 1/2: Creating token (service fee: ${fixedChargeSol.toFixed(1)} SOL${revokeText})...`;
+      }
       
       const createResp = await fetch(`${TOKEN_SERVICE_URL}/api/create-token-metaplex`, {
         method: "POST",
@@ -336,8 +343,8 @@
       console.log("✅ Base token created (unsigned):", mint);
 
       // Sign & send first transaction
-      const feeText = revokeCost > 0 ? ` (${fixedChargeSol.toFixed(1)} SOL total, includes ${revokeCost.toFixed(1)} SOL for revokes)` : ` (${fixedChargeSol.toFixed(1)} SOL total)`;
-      if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee${feeText} for both transactions.`;
+      const revokeText = revokeCostDisplay > 0 ? ` Revokes (${revokeCostDisplay.toFixed(1)} SOL) will be charged separately.` : '';
+      if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee (${fixedChargeSol.toFixed(1)} SOL total).${revokeText}`;
       
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
@@ -484,6 +491,14 @@
       if (revokeState.freeze || revokeState.mint || revokeState.update) {
         if (elLoadInfo) elLoadInfo.textContent = "Preparing revoke transactions...";
         
+        console.log("Requesting revoke transactions:", {
+          wallet: storedWallet,
+          mint: mint,
+          revoke_mint: revokeState.mint,
+          revoke_freeze: revokeState.freeze,
+          revoke_update: revokeState.update
+        });
+        
         const revokeResp = await fetch(`${API_BASE}/api/revoke-all`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -496,37 +511,120 @@
           }),
         });
 
+        console.log(`📥 Revoke response status: ${revokeResp.status} ${revokeResp.statusText}`);
         const revokeData = await revokeResp.json();
+        console.log(`📥 Revoke response data:`, revokeData);
         
         if (!revokeResp.ok) {
           const errorMsg = revokeData?.detail || revokeData?.message || revokeData?.error || "Failed to create revoke transactions";
-          console.error("Revoke request failed:", errorMsg);
+          console.error("❌ Revoke request failed:", {
+            status: revokeResp.status,
+            statusText: revokeResp.statusText,
+            error: errorMsg,
+            fullResponse: revokeData
+          });
           if (elLoadInfo) {
             elLoadInfo.textContent = `Error: ${errorMsg}`;
             elLoadInfo.style.color = "#ff4444";
           }
         } else if (revokeData?.success) {
+          console.log("📋 Revoke response:", {
+            success: revokeData.success,
+            transactionsCount: revokeData.transactions?.length || 0,
+            message: revokeData.message
+          });
+          
           if (revokeData.transactions?.length > 0) {
             if (elLoadInfo) elLoadInfo.textContent = `Please sign ${revokeData.transactions.length} revoke transaction(s)...`;
             
             for (let i = 0; i < revokeData.transactions.length; i++) {
+              console.log(`\n🔄 Processing revoke transaction ${i + 1}/${revokeData.transactions.length}`);
+              
               const txB64 = revokeData.transactions[i];
+              console.log(`📦 Transaction base64 length: ${txB64.length} chars`);
+              
               const txBytes = b64ToBytes(txB64);
+              console.log(`📦 Transaction bytes length: ${txBytes.length} bytes`);
+              
               const tx = solanaWeb3.Transaction.from(txBytes);
+              console.log(`📝 Transaction after deserialize:`, {
+                instructionsCount: tx.instructions.length,
+                instructionPrograms: tx.instructions.map((ix, idx) => ({
+                  index: idx,
+                  programId: ix.programId.toBase58(),
+                  keysCount: ix.keys.length,
+                  dataLength: ix.data.length
+                })),
+                feePayer: tx.feePayer?.toBase58(),
+                recentBlockhash: tx.recentBlockhash
+              });
+              
+              // КРИТИЧЕСКАЯ ПРОВЕРКА: должны быть инструкции от Token Program
+              const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+              const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+              const tokenInstructions = tx.instructions.filter(ix => {
+                const programId = ix.programId.toBase58();
+                return programId === TOKEN_2022_PROGRAM_ID || programId === TOKEN_PROGRAM_ID;
+              });
+              
+              console.log(`🔍 Token Program instructions check:`, {
+                found: tokenInstructions.length,
+                expected: (revokeState.mint ? 1 : 0) + (revokeState.freeze ? 1 : 0),
+                tokenInstructions: tokenInstructions.map((ix, idx) => ({
+                  index: tx.instructions.indexOf(ix),
+                  programId: ix.programId.toBase58(),
+                  keysCount: ix.keys.length,
+                  dataLength: ix.data.length
+                }))
+              });
+              
+              if (tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
+                console.error(`❌ CRITICAL: No Token Program instructions found! Expected revoke instructions but transaction only has:`, 
+                  tx.instructions.map(ix => ix.programId.toBase58())
+                );
+                if (elLoadInfo) {
+                  elLoadInfo.textContent = `Error: Transaction missing revoke instructions. Please contact support.`;
+                  elLoadInfo.style.color = "#ff4444";
+                }
+                continue;
+              }
               
               const { blockhash } = await connection.getLatestBlockhash("finalized");
+              console.log(`🔗 New blockhash: ${blockhash}`);
               tx.recentBlockhash = blockhash;
+              console.log(`✅ Blockhash updated in transaction`);
               
+              // Проверка после изменения blockhash
+              const tokenInstructionsAfter = tx.instructions.filter(ix => {
+                const programId = ix.programId.toBase58();
+                return programId === TOKEN_2022_PROGRAM_ID || programId === TOKEN_PROGRAM_ID;
+              });
+              console.log(`🔍 Token Program instructions after blockhash update:`, {
+                found: tokenInstructionsAfter.length,
+                instructionsCount: tx.instructions.length
+              });
+              
+              if (tokenInstructionsAfter.length === 0 && (revokeState.mint || revokeState.freeze)) {
+                console.error(`❌ CRITICAL: Token Program instructions lost after blockhash update!`);
+              }
+              
+              console.log(`✍️ Signing transaction...`);
               const signedTx = await provider.wallet.signTransaction(tx);
+              console.log(`✅ Transaction signed:`, {
+                signatures: signedTx.signatures.map(sig => sig.publicKey.toBase58()),
+                signatureCount: signedTx.signatures.length
+              });
               
               if (elLoadInfo) elLoadInfo.textContent = `Sending revoke transaction ${i + 1}/${revokeData.transactions.length}...`;
               
               let binary = '';
               const signedBytes = signedTx.serialize();
+              console.log(`📦 Serialized signed transaction: ${signedBytes.length} bytes`);
               for (let j = 0; j < signedBytes.length; j++) {
                 binary += String.fromCharCode(signedBytes[j]);
               }
               const signedB64 = btoa(binary);
+              console.log(`📤 Sending transaction to ${TOKEN_SERVICE_URL}/api/send-transaction`);
               
               const sendRevokeResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
                 method: "POST",
@@ -537,15 +635,57 @@
                 }),
               });
               
+              console.log(`📥 Response status: ${sendRevokeResp.status} ${sendRevokeResp.statusText}`);
               const sendRevokeData = await sendRevokeResp.json();
+              console.log(`📥 Response data:`, sendRevokeData);
+              
               if (!sendRevokeResp.ok || !sendRevokeData?.success) {
-                console.error(`Failed to send revoke transaction ${i + 1}:`, sendRevokeData?.error);
+                const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || "Unknown error";
+                console.error(`❌ Failed to send revoke transaction ${i + 1}:`, {
+                  status: sendRevokeResp.status,
+                  statusText: sendRevokeResp.statusText,
+                  error: errorMsg,
+                  fullResponse: sendRevokeData
+                });
+                
+                // Сохраняем информацию о неудачной попытке revoke для возможности повтора
+                const revokeErrorInfo = {
+                  mint: mint,
+                  wallet: storedWallet,
+                  revokeType: i === 0 ? (revokeState.mint ? 'mint' : 'freeze') : 'freeze',
+                  error: errorMsg,
+                  timestamp: new Date().toISOString()
+                };
+                console.warn(`⚠️ Revoke failed, you can retry later. Info:`, revokeErrorInfo);
+                
                 if (elLoadInfo) {
-                  elLoadInfo.textContent = `Error sending revoke transaction ${i + 1}: ${sendRevokeData?.error || "Unknown error"}`;
-                  elLoadInfo.style.color = "#ff4444";
+                  elLoadInfo.innerHTML = `
+                    <div style="color: #ff4444;">
+                      <strong>Error sending revoke transaction ${i + 1}:</strong><br>
+                      ${errorMsg}<br><br>
+                      <small style="color: #888;">
+                        ⚠️ Your token was created successfully, but revoke failed.<br>
+                        You can retry revoke later using the same mint address: <code>${mint}</code>
+                      </small>
+                    </div>
+                  `;
                 }
+                
+                // Не прерываем процесс - токен уже создан, revoke можно повторить позже
+                // Но логируем ошибку для пользователя
               } else {
-                console.log(`✅ Revoke transaction ${i + 1} sent:`, sendRevokeData.signature);
+                console.log(`✅ Revoke transaction ${i + 1} sent successfully:`, {
+                  signature: sendRevokeData.signature,
+                  success: sendRevokeData.success
+                });
+                
+                // Проверяем, что транзакция действительно подтверждена
+                if (sendRevokeData.signature) {
+                  console.log(`🔍 Check transaction on explorer:`, {
+                    devnet: `https://explorer.solana.com/tx/${sendRevokeData.signature}?cluster=devnet`,
+                    solscan: `https://solscan.io/tx/${sendRevokeData.signature}?cluster=devnet`
+                  });
+                }
               }
               
               await sleep(500);
