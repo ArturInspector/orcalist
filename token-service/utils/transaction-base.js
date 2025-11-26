@@ -10,11 +10,15 @@ const {
   TOKEN_2022_PROGRAM_ID,
   MINT_SIZE,
   createInitializeMintInstruction,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
 } = require('@solana/spl-token');
 
 async function createBaseToken2022({
   wallet,
   decimals = 9,
+  supply,
   priorityFee = 250000,
   rpcUrl = 'https://api.devnet.solana.com',
   chargeTo = null,
@@ -88,6 +92,62 @@ async function createBaseToken2022({
   );
   transaction.add(initMintIx);
   console.log('[createBaseToken2022] Added InitializeMint instruction');
+  
+  // Mint initial supply if specified
+  if (supply && supply > 0) {
+    try {
+      // Get associated token account address
+      const associatedTokenAddress = await getAssociatedTokenAddress(
+        mint,
+        payer,
+        false, // allowOwnerOffCurve
+        TOKEN_2022_PROGRAM_ID
+      );
+      
+      console.log(`[createBaseToken2022] Associated Token Account: ${associatedTokenAddress.toBase58()}`);
+      
+      // Check if ATA already exists
+      const ataInfo = await connection.getAccountInfo(associatedTokenAddress);
+      if (!ataInfo) {
+        // Create ATA instruction
+        const createAtaIx = createAssociatedTokenAccountInstruction(
+          payer,  // payer
+          associatedTokenAddress,  // associatedToken
+          payer,  // owner
+          mint,  // mint
+          TOKEN_2022_PROGRAM_ID
+        );
+        transaction.add(createAtaIx);
+        console.log('[createBaseToken2022] Added CreateAssociatedTokenAccount instruction');
+      } else {
+        console.log('[createBaseToken2022] Associated Token Account already exists');
+      }
+      
+      // Calculate raw amount: supply * 10^decimals
+      // Используем BigInt для точности при больших числах
+      const supplyBigInt = BigInt(Math.floor(supply));
+      const decimalsMultiplier = BigInt(10) ** BigInt(decimals);
+      const rawAmount = supplyBigInt * decimalsMultiplier;
+      console.log(`[createBaseToken2022] Minting ${supply} tokens (raw: ${rawAmount.toString()}) with decimals ${decimals}`);
+      
+      // Mint tokens instruction
+      const mintToIx = createMintToInstruction(
+        mint,  // mint
+        associatedTokenAddress,  // destination
+        payer,  // authority (mint authority)
+        rawAmount,  // amount
+        [],  // multiSigners
+        TOKEN_2022_PROGRAM_ID
+      );
+      transaction.add(mintToIx);
+      console.log('[createBaseToken2022] Added MintTo instruction');
+    } catch (error) {
+      console.error('[createBaseToken2022] Error adding mint instructions:', error);
+      throw new Error(`Failed to add mint instructions: ${error.message}`);
+    }
+  } else {
+    console.log('[createBaseToken2022] No initial supply specified, skipping mint');
+  }
   
   // fixed charge (if specified)
   // 0.0151156 SOL = 15,115,600 lamports

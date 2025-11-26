@@ -118,6 +118,13 @@ async def upload_metadata(request: Request):
         symbol = body.get("symbol", "")
         description = body.get("description", "") or ""
         image = body.get("image", "")
+        
+        # Получаем соцсети (опционально)
+        website = body.get("website", "").strip()
+        twitter = body.get("twitter", "").strip()
+        telegram = body.get("telegram", "").strip()
+        discord = body.get("discord", "").strip()
+        
         logger.info(f"Upload metadata: name={name}, symbol={symbol}, description='{description}', image={image[:50] if image else 'empty'}...")
         
         # Заменяем любые gateway на надежный для изображения в метаданных
@@ -135,6 +142,16 @@ async def upload_metadata(request: Request):
         }
         if image:
             metadata["image"] = image
+        
+        # Добавляем соцсети в метаданные (если есть)
+        if website:
+            metadata["external_url"] = website
+        if twitter:
+            metadata["twitter"] = twitter
+        if telegram:
+            metadata["telegram"] = telegram
+        if discord:
+            metadata["discord"] = discord
         
         import json as json_lib
         metadata_json = json_lib.dumps(metadata)
@@ -476,13 +493,13 @@ async def revoke_all(request: Request):
             raise HTTPException(status_code=400, detail="At least one revoke required")
 
         revoke_count = sum([revoke_mint, revoke_freeze, revoke_update])
-        revoke_cost = revoke_count * 0.0999 
+        revoke_cost = revoke_count * 0.0999
         logger.info(
             f"post /api/revoke-all: wallet={safe_wallet_log(wallet) if wallet else 'None'}, "
             f"wallet_hash={hash_wallet(wallet) if wallet else 'none'}, "
             f"mint={mint_address[:8] if mint_address else 'None'}..., "
             f"revokes=[mint={revoke_mint}, freeze={revoke_freeze}, update={revoke_update}], "
-            f"count={revoke_count}, expected_cost={revoke_cost:.1f} SOL"
+            f"count={revoke_count}, expected_cost={revoke_cost:.4f} SOL"
         )
 
         conn = Client(RPC_URL)
@@ -527,7 +544,10 @@ async def revoke_all(request: Request):
                         
                         # Добавляем транзакции от Token Service
                         service_transactions = data.get("transactions", [])
-                        logger.info(f"Token Service returned {len(service_transactions)} transactions")
+                        logger.info(
+                            f"Token Service returned {len(service_transactions)} transactions for "
+                            f"revoke_mint={revoke_mint}, revoke_freeze={revoke_freeze}"
+                        )
                         transactions.extend(service_transactions)
             except HTTPException:
                 raise

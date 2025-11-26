@@ -152,6 +152,12 @@
       const tokenSymbol = document.getElementById("tokenSymbol")?.value || "TKN";
       const description = document.getElementById("description")?.value || "";
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
+      
+      // Собираем соцсети
+      const website = document.getElementById("website")?.value?.trim() || "";
+      const twitter = document.getElementById("twitter")?.value?.trim() || "";
+      const telegram = document.getElementById("telegram")?.value?.trim() || "";
+      const discord = document.getElementById("discord")?.value?.trim() || "";
 
       // STEP 1: Upload metadata to IPFS (Python API)
       let metadataUri = "";
@@ -164,7 +170,11 @@
             name: tokenName,
             symbol: tokenSymbol,
             description,
-            image: ipfsLogo
+            image: ipfsLogo,
+            website: website,
+            twitter: twitter,
+            telegram: telegram,
+            discord: discord
           }),
         });
         const metaData = await metaResp.json();

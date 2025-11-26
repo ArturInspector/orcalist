@@ -104,17 +104,16 @@ async function createRevokeTransactions({
         message: 'All requested authorities are already revoked',
       };
     }
-    
-    // Charge transfer
-    if (chargeTo) {
+    if (chargeTo && instructionsAdded > 0) {
       const chargeToPubkey = new PublicKey(chargeTo);
-      const revokeChargeLamports = Math.floor(0.0999 * 1_000_000_000); // 99,900,000 lamports
+      const revokeChargeLamports = Math.floor(instructionsAdded * 0.0999 * 1_000_000_000);
+      const chargeSol = (instructionsAdded * 0.0999).toFixed(4);
       tx.add(SystemProgram.transfer({
         fromPubkey: payer,
         toPubkey: chargeToPubkey,
         lamports: revokeChargeLamports,
       }));
-      console.log(`[revoke-authority] Added charge transfer: ${revokeChargeLamports} lamports to ${chargeTo}`);
+      console.log(`[revoke-authority] Added charge transfer: ${revokeChargeLamports} lamports (${instructionsAdded} revokes * 0.0999 SOL = ${chargeSol} SOL) to ${chargeTo}`);
     }
     
     // Get blockhash and set fee payer

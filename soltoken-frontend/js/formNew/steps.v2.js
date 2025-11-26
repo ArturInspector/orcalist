@@ -251,13 +251,20 @@
       if (!storedWallet) throw new Error("Connect wallet first.");
 
       const decimals = Number(document.getElementById("decimals")?.value || 9);
+      const supply = Number(document.getElementById("supply")?.value || 0);
       const tokenName = document.getElementById("tokenName")?.value || "";
       const tokenSymbol = document.getElementById("tokenSymbol")?.value || "";
       const description = document.getElementById("description")?.value || "";
       console.log("[onCreateToken] Description from form:", description);
+      console.log("[onCreateToken] Supply from form:", supply);
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
+      
+      // Собираем соцсети
+      const website = document.getElementById("website")?.value?.trim() || "";
+      const twitter = document.getElementById("twitter")?.value?.trim() || "";
+      const telegram = document.getElementById("telegram")?.value?.trim() || "";
+      const discord = document.getElementById("discord")?.value?.trim() || "";
 
-      // Валидация: проверяем, что name и symbol не пустые
       if (!tokenName || !tokenName.trim()) {
         throw new Error("Token name is required");
       }
@@ -265,7 +272,6 @@
         throw new Error("Token symbol is required");
       }
 
-      // Сохраняем значения для использования в обоих шагах
       const savedTokenName = tokenName.trim();
       const savedTokenSymbol = tokenSymbol.trim();
       const savedIpfsLogo = ipfsLogo;
@@ -312,6 +318,7 @@
           name: savedTokenName,
           symbol: savedTokenSymbol,
           decimals,
+          supply: supply > 0 ? supply : undefined,
           image_uri: savedIpfsLogo,
           priority_fee: 250000,
           rpc_url: RPC_URL,
@@ -403,7 +410,11 @@
           name: savedTokenName,
           symbol: savedTokenSymbol,
           description: description,
-          image: savedIpfsLogo || "" // Может быть пустым
+          image: savedIpfsLogo || "", // Может быть пустым
+          website: website,
+          twitter: twitter,
+          telegram: telegram,
+          discord: discord
         }),
       });
       
@@ -578,7 +589,22 @@
                 }))
               });
               
-              if (tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
+              if (i === 0 && tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
+                console.error(`❌ CRITICAL: First transaction should contain Token Program instructions!`);
+                if (elLoadInfo) {
+                  elLoadInfo.textContent = `Error: Transaction missing revoke instructions. Please contact support.`;
+                  elLoadInfo.style.color = "#ff4444";
+                }
+                continue;
+              }
+              
+              const METAPLEX_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+              const isUpdateRevokeTransaction = tx.instructions.some(ix => 
+                ix.programId.toBase58() === METAPLEX_PROGRAM_ID
+              );
+
+              if (!isUpdateRevokeTransaction && tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
+                // Это должна быть транзакция с mint/freeze revoke, но Token Program инструкций нет
                 console.error(`❌ CRITICAL: No Token Program instructions found! Expected revoke instructions but transaction only has:`, 
                   tx.instructions.map(ix => ix.programId.toBase58())
                 );
@@ -587,6 +613,14 @@
                   elLoadInfo.style.color = "#ff4444";
                 }
                 continue;
+              } else if (isUpdateRevokeTransaction) {
+                // Это транзакция revoke_update - использует Metaplex Program, это нормально
+                console.log(`✅ Update revoke transaction detected (Metaplex Program)`);
+                console.log(`📋 Metaplex instruction details:`, {
+                  programId: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.programId.toBase58(),
+                  keysCount: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.keys.length,
+                  dataLength: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.data.length,
+                });
               }
               
               const { blockhash } = await connection.getLatestBlockhash("finalized");
@@ -608,12 +642,25 @@
                 console.error(`❌ CRITICAL: Token Program instructions lost after blockhash update!`);
               }
               
-              console.log(`✍️ Signing transaction...`);
-              const signedTx = await provider.wallet.signTransaction(tx);
-              console.log(`✅ Transaction signed:`, {
-                signatures: signedTx.signatures.map(sig => sig.publicKey.toBase58()),
-                signatureCount: signedTx.signatures.length
-              });
+              try {
+                console.log(`✍️ Signing transaction...`);
+                const signedTx = await provider.wallet.signTransaction(tx);
+                console.log(`✅ Transaction signed:`, {
+                  signatures: signedTx.signatures.map(sig => sig.publicKey.toBase58()),
+                  signatureCount: signedTx.signatures.length
+                });
+              } catch (error) {
+                // Обработка отмены пользователем
+                if (error.code === 4001 || error.message?.includes('User rejected') || error.message?.includes('User cancelled')) {
+                  console.log('❌ User rejected transaction');
+                  if (elLoadInfo) {
+                    elLoadInfo.textContent = 'Transaction cancelled by user';
+                    elLoadInfo.style.color = "#ff9900";
+                  }
+                  return; // Прерываем процесс, не показываем ошибку
+                }
+                throw error; // Пробрасываем другие ошибки
+              }
               
               if (elLoadInfo) elLoadInfo.textContent = `Sending revoke transaction ${i + 1}/${revokeData.transactions.length}...`;
               

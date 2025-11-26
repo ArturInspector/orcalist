@@ -157,6 +157,7 @@ router.post('/create-token-metaplex', async (req, res) => {
       name,
       symbol,
       decimals = 9,
+      supply,
       image_uri = '',
       priority_fee = 250000,
       rpc_url = 'https://api.devnet.solana.com',
@@ -176,6 +177,7 @@ router.post('/create-token-metaplex', async (req, res) => {
     const result = await createBaseToken2022({
       wallet,
       decimals,
+      supply: supply ? Number(supply) : undefined,
       priorityFee: priority_fee,
       rpcUrl: rpc_url,
       chargeTo: charge_to,

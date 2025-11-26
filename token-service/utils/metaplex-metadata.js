@@ -6,6 +6,7 @@ const {
   signerIdentity,
   percentAmount,
   none,
+  some,
   publicKey,
   transactionBuilder,
 } = require('@metaplex-foundation/umi');
@@ -314,11 +315,72 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, charge
   umi.use(signerIdentity(dummySigner));
 
   const [metadataPda] = findMetadataPda(umi, { mint });
+  
+  // Проверяем текущий update authority
+  console.log(`[revoke-update-authority] Checking metadata for mint: ${mintAddress}`);
+  console.log(`[revoke-update-authority] Metadata PDA: ${metadataPda}`);
+  
+  try {
+    const { Connection } = require('@solana/web3.js');
+    const connection = new Connection(rpcUrl, 'confirmed');
+    const metadataAccount = await connection.getAccountInfo(new PublicKey(metadataPda));
+    
+    if (!metadataAccount) {
+      throw new Error(`Metadata account not found for mint ${mintAddress}`);
+    }
+    
+    // Парсим метаданные для получения update authority
+    // Структура: https://github.com/metaplex-foundation/metaplex-program-library/blob/master/token-metadata/program/src/state.rs
+    // Update authority находится по смещению 1 (key) + 32 (update authority pubkey)
+    const updateAuthorityBytes = metadataAccount.data.slice(1, 33);
+    const currentUpdateAuthority = new PublicKey(updateAuthorityBytes);
+    
+    console.log(`[revoke-update-authority] Current update authority: ${currentUpdateAuthority.toBase58()}`);
+    console.log(`[revoke-update-authority] Payer address: ${payerAddress}`);
+    
+    // Проверяем, что update authority уже revoked (все нули или null)
+    const isRevoked = updateAuthorityBytes.every(byte => byte === 0);
+    
+    if (isRevoked) {
+      console.log(`[revoke-update-authority] Update authority already revoked`);
+      return {
+        success: true,
+        transaction: null,
+        message: 'Update authority already revoked',
+      };
+    }
+    
+    // Проверяем, что payer является текущим update authority
+    if (!currentUpdateAuthority.equals(payerWeb3Js)) {
+      throw new Error(
+        `Payer is not the current update authority. ` +
+        `Current: ${currentUpdateAuthority.toBase58()}, ` +
+        `Payer: ${payerAddress}`
+      );
+    }
+    
+    console.log(`[revoke-update-authority] Payer is the update authority, proceeding with revoke`);
+  } catch (error) {
+    console.error(`[revoke-update-authority] Error checking metadata:`, error);
+    throw error;
+  }
 
+  // WORKAROUND: Metaplex bug - none() doesn't work for revoke
+  // Transfer to System Program instead (11111111111111111111111111111111)
+  // System Program cannot sign transactions, so this effectively revokes the authority
+  const SYSTEM_PROGRAM_ID = publicKey('11111111111111111111111111111111');
+  
   const builder = updateV1(umi, {
     mint,
     authority: payer,
-    newUpdateAuthority: null,
+    newUpdateAuthority: SYSTEM_PROGRAM_ID, // Use System Program instead of none()
+    isMutable: false,
+  });
+
+  console.log(`[revoke-update-authority] updateV1 builder created with:`, {
+    mint: mintAddress,
+    authority: payerAddress,
+    newUpdateAuthority: 'System Program (11111111111111111111111111111111)',
     isMutable: false,
   });
 
@@ -331,7 +393,7 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, charge
   if (chargeTo) {
     const { SystemProgram } = require('@solana/web3.js');
     const chargeToPubkey = new PublicKey(chargeTo);
-    const revokeChargeLamports = Math.floor(0.0999 * 1_000_000_000); // 99,900,000 lamports
+    const revokeChargeLamports = Math.floor(0.0999 * 1_000_000_000);
     
     const transferIx = SystemProgram.transfer({
       fromPubkey: payerWeb3Js,
@@ -340,12 +402,24 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, charge
     });
     
     web3LegacyTransaction.add(transferIx);
+    console.log(`[revoke-update-authority] Added charge transfer: ${revokeChargeLamports} lamports to ${chargeTo}`);
   }
 
   const serialized = web3LegacyTransaction.serialize({
     requireAllSignatures: false,
     verifySignatures: false,
   });
+
+  console.log(`[revoke-update-authority] Transaction instructions:`, 
+    web3LegacyTransaction.instructions.map((ix, idx) => ({
+      index: idx,
+      programId: ix.programId.toBase58(),
+      keysCount: ix.keys.length,
+      dataLength: ix.data.length,
+    }))
+  );
+
+  console.log(`[revoke-update-authority] Created transaction with ${web3LegacyTransaction.instructions.length} instructions`);
 
   return {
     success: true,
