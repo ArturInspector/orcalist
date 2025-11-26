@@ -2,15 +2,16 @@
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла
 load_dotenv()
 
-# RPC конфигурация (по умолчанию devnet)
-# Поддержка Helius RPC: если есть HELIUS_API_KEY, используем Helius devnet
-# Формат: https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
+NETWORK = os.getenv("NETWORK", "devnet").strip().lower()
+
 if HELIUS_API_KEY:
-    RPC_URL = f"https://devnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    if NETWORK == "mainnet":
+        RPC_URL = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    else:
+        RPC_URL = f"https://devnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
     RPC_PROVIDER = "Helius"
 else:
     RPC_URL = (
@@ -20,12 +21,10 @@ else:
     ).strip()
     RPC_PROVIDER = "Public" if "devnet.solana.com" in RPC_URL else "Custom"
 
-# Куда уходит фикс-чардж (адрес НА devnet!)
-# Лучше поставить тот же Phantom, которым подписываешь — точно существует на devnet.
 CHARGE_TO = (os.getenv("CHARGE_TO") or "HD7dHSFCuvDQqSUuCULA6ssrwceTVVYQwb9wc3iZG5rG").strip()
 
-# Сколько снимаем за создание токена (в SOL)
 FIXED_CHARGE_SOL = float(os.getenv("FIXED_CHARGE_SOL", "0.2"))
+REVOKE_CHARGE_SOL = float(os.getenv("REVOKE_CHARGE_SOL", "0.0999"))
 
 
 # IPFS Storage provider - Pinata (бесплатный тариф)

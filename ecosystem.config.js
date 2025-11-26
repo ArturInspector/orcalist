@@ -6,13 +6,12 @@ module.exports = {
       script: "/home/lyudskoe/projects/kwork/orcalist/venv/bin/python",
       args: "-m uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
       env: {
-        // Для использования Helius RPC раскомментируйте и укажите ваш API key:
-        // HELIUS_API_KEY: "your-helius-api-key-here",
-        // Или используйте прямой RPC URL:
-        // RPC_URL: "https://devnet.helius-rpc.com/?api-key=your-helius-api-key-here",
+        HELIUS_API_KEY: "",
+        NETWORK: "devnet",
         RPC_URL: "https://api.devnet.solana.com",
         CHARGE_TO: "GxdD2CM13WMgV7ikvsX6zPi6JbNoWN88RZbSNMfXsCuM",
         FIXED_CHARGE_SOL: "0.2",
+        REVOKE_CHARGE_SOL: "0.0999",
         TOKEN_SERVICE_URL: "http://localhost:3001"
       },
       max_restarts: 10,
@@ -28,7 +27,9 @@ module.exports = {
       max_memory_restart: "300M",
       env: {
         TOKEN_SERVICE_PORT: "3001",
-        NODE_ENV: "production"
+        NODE_ENV: "production",
+        RPC_URL: "https://api.devnet.solana.com",
+        REVOKE_CHARGE_SOL: "0.0999"
       },
       max_restarts: 10,
       restart_delay: 2000

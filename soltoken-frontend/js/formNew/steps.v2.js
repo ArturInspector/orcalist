@@ -159,25 +159,39 @@
     update: false
   };
 
+  let fixedChargeSol = 0.2;
+  let revokeChargeSol = 0.0999;
+
+  async function loadConfig() {
+    try {
+      const configResp = await fetch(`${API_BASE}/api/config`);
+      if (configResp.ok) {
+        const config = await configResp.json();
+        fixedChargeSol = config.fixed_charge_sol || 0.2;
+        revokeChargeSol = config.revoke_charge_sol || 0.0999;
+        updateCost();
+      }
+    } catch (error) {
+      console.warn("Failed to load config:", error);
+    }
+  }
+
   function updateCost() {
-    const baseCost = 0.2;
-    const revokeCostReal = (revokeState.freeze ? 0.0999 : 0) + 
-                           (revokeState.mint ? 0.0999 : 0) + 
-                           (revokeState.update ? 0.0999 : 0);
-    const revokeCostDisplay = (revokeState.freeze ? 0.1 : 0) + 
-                              (revokeState.mint ? 0.1 : 0) + 
-                              (revokeState.update ? 0.1 : 0);
-    const total = baseCost + revokeCostDisplay;
+    const revokeCount = (revokeState.freeze ? 1 : 0) + (revokeState.mint ? 1 : 0) + (revokeState.update ? 1 : 0);
+    const revokeCostDisplay = revokeCount * revokeChargeSol;
+    const total = fixedChargeSol + revokeCostDisplay;
     
     if (elTotalCost) {
       if (revokeCostDisplay > 0) {
-        elTotalCost.textContent = `Cost: ${baseCost.toFixed(1)} SOL + ${revokeCostDisplay.toFixed(1)} SOL (revokes) = ${total.toFixed(1)} SOL`;
+        elTotalCost.textContent = `Cost: ${fixedChargeSol.toFixed(4)} SOL + ${revokeCostDisplay.toFixed(4)} SOL (revokes) = ${total.toFixed(4)} SOL`;
       } else {
-        elTotalCost.textContent = `Cost: ${total.toFixed(1)} SOL`;
+        elTotalCost.textContent = `Cost: ${total.toFixed(4)} SOL`;
       }
       elTotalCost.style.display = "block";
     }
   }
+
+  loadConfig();
 
   document.querySelectorAll('.selector__btn').forEach(btn => {
     btn.addEventListener('click', function() {
@@ -279,27 +293,28 @@
       const connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
       const provider = await getProvider();
 
-      // Получаем конфиг с fixed_charge
       let chargeTo = null;
       let fixedChargeSol = 0;
+      let revokeChargeSol = 0.0999;
       try {
         const configResp = await fetch(`${API_BASE}/api/config`);
         if (configResp.ok) {
           const config = await configResp.json();
           chargeTo = config.charge_to || null;
           fixedChargeSol = config.fixed_charge_sol || 0;
-          console.log(`[Config] charge_to: ${chargeTo}, fixed_charge_sol: ${fixedChargeSol}`);
+          revokeChargeSol = config.revoke_charge_sol || 0.0999;
+          console.log(`[Config] charge_to: ${chargeTo}, fixed_charge_sol: ${fixedChargeSol}, revoke_charge_sol: ${revokeChargeSol}`);
         }
       } catch (error) {
         console.warn("Failed to fetch config, continuing without fixed_charge:", error);
       }
 
-      const revokeCostReal = (revokeState.freeze ? 0.0999 : 0) + 
-                             (revokeState.mint ? 0.0999 : 0) + 
-                             (revokeState.update ? 0.0999 : 0);
-      const revokeCostDisplay = (revokeState.freeze ? 0.1 : 0) + 
-                                (revokeState.mint ? 0.1 : 0) + 
-                                (revokeState.update ? 0.1 : 0);
+      const revokeCostReal = (revokeState.freeze ? revokeChargeSol : 0) + 
+                             (revokeState.mint ? revokeChargeSol : 0) + 
+                             (revokeState.update ? revokeChargeSol : 0);
+      const revokeCostDisplay = (revokeState.freeze ? revokeChargeSol : 0) + 
+                                (revokeState.mint ? revokeChargeSol : 0) + 
+                                (revokeState.update ? revokeChargeSol : 0);
       
       if (revokeCostReal > 0) {
         console.log(`[Revokes] Will charge ${revokeCostReal.toFixed(4)} SOL separately for revokes (freeze: ${revokeState.freeze}, mint: ${revokeState.mint}, update: ${revokeState.update})`);
@@ -321,7 +336,6 @@
           supply: supply > 0 ? supply : undefined,
           image_uri: savedIpfsLogo,
           priority_fee: 250000,
-          rpc_url: RPC_URL,
           charge_to: chargeTo,
           fixed_charge_sol: fixedChargeSol,
         }),
@@ -379,7 +393,6 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           signed_transaction: signedTx1Base64,
-          rpc_url: RPC_URL,
         }),
       });
 
@@ -449,8 +462,7 @@
           payer: storedWallet,
           name: savedTokenName,
           symbol: savedTokenSymbol,
-          uri: metadataUri, // URI JSON метаданных, а не изображения напрямую
-          rpc_url: RPC_URL,
+          uri: metadataUri,
         }),
       });
 
@@ -487,7 +499,6 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           signed_transaction: signedTx2Base64,
-          rpc_url: RPC_URL,
         }),
       });
 
@@ -678,7 +689,6 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   signed_transaction: signedB64,
-                  rpc_url: RPC_URL,
                 }),
               });
               

@@ -9,6 +9,9 @@ const { createBaseToken2022 } = require('../utils/transaction-base');
 const { addMetaplexMetadata, revokeUpdateAuthority } = require('../utils/metaplex-metadata');
 const { createRevokeTransactions } = require('../utils/revoke-authority');
 
+const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
+const REVOKE_CHARGE_SOL = parseFloat(process.env.REVOKE_CHARGE_SOL || '0.0999');
+
 router.post('/create-simple-token', async (req, res) => {
   try {
     const {
@@ -17,7 +20,6 @@ router.post('/create-simple-token', async (req, res) => {
       symbol,
       decimals = 9,
       priority_fee = 250000,
-      rpc_url = 'https://api.devnet.solana.com',
     } = req.body;
 
     if (!wallet || !name || !symbol) {
@@ -35,7 +37,7 @@ router.post('/create-simple-token', async (req, res) => {
       symbol,
       decimals,
       priorityFee: priority_fee,
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
     });
 
     res.json(result);
@@ -59,14 +61,12 @@ router.post('/create-token', async (req, res) => {
       symbol,
       decimals = 9,
       description = '',
-      image_uri = '', // URI изображения (IPFS), если есть
+      image_uri = '',
       priority_fee = 250000,
-      rpc_url = 'https://api.devnet.solana.com',
       charge_to = null,
       fixed_charge_sol = 0
     } = req.body;
 
-    // Validation
     if (!wallet) {
       return res.status(400).json({ 
         success: false, 
@@ -83,16 +83,15 @@ router.post('/create-token', async (req, res) => {
 
     console.log('Creating token transaction:', { wallet, name, symbol, decimals });
 
-    // Create transaction (unsigned)
     const result = await createTokenTransaction({
       wallet,
       name,
       symbol,
       decimals,
       description,
-      imageUri: image_uri, // только URI изображения
+      imageUri: image_uri,
       priorityFee: priority_fee,
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
       chargeTo: charge_to,
       fixedChargeSol: fixed_charge_sol
     });
@@ -117,7 +116,6 @@ router.post('/send-transaction', async (req, res) => {
   try {
     const {
       signed_transaction,
-      rpc_url = 'https://api.devnet.solana.com'
     } = req.body;
 
     if (!signed_transaction) {
@@ -131,7 +129,7 @@ router.post('/send-transaction', async (req, res) => {
 
     const result = await sendSignedTransaction({
       signedTransaction: signed_transaction,
-      rpcUrl: rpc_url
+      rpcUrl: RPC_URL
     });
 
     res.json({
@@ -160,7 +158,6 @@ router.post('/create-token-metaplex', async (req, res) => {
       supply,
       image_uri = '',
       priority_fee = 250000,
-      rpc_url = 'https://api.devnet.solana.com',
       charge_to = null,
       fixed_charge_sol = 0,
     } = req.body;
@@ -179,7 +176,7 @@ router.post('/create-token-metaplex', async (req, res) => {
       decimals,
       supply: supply ? Number(supply) : undefined,
       priorityFee: priority_fee,
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
       chargeTo: charge_to,
       fixedChargeSol: fixed_charge_sol,
       name: name || '',
@@ -214,7 +211,6 @@ router.post('/add-metaplex-metadata', async (req, res) => {
       name,
       symbol,
       uri,
-      rpc_url = 'https://api.devnet.solana.com',
     } = req.body;
 
     if (!mint || !mint_secret_key || !payer || !name || !symbol) {
@@ -239,7 +235,7 @@ router.post('/add-metaplex-metadata', async (req, res) => {
       name: sanitizeString(name),
       symbol: sanitizeString(symbol),
       uri: sanitizeString(uri || ''),
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
     });
 
     res.json({
@@ -258,7 +254,7 @@ router.post('/add-metaplex-metadata', async (req, res) => {
 
 router.post('/revoke-update-authority', async (req, res) => {
   try {
-    const { mint, payer, rpc_url = 'https://api.devnet.solana.com', charge_to = null } = req.body;
+    const { mint, payer, charge_to = null } = req.body;
 
     if (!mint || !payer) {
       return res.status(400).json({ 
@@ -270,7 +266,7 @@ router.post('/revoke-update-authority', async (req, res) => {
     const result = await revokeUpdateAuthority({
       mintAddress: mint,
       payerAddress: payer,
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
       chargeTo: charge_to,
     });
 
@@ -295,7 +291,6 @@ router.post('/revoke-authority', async (req, res) => {
       revoke_mint = false,
       revoke_freeze = false,
       priority_fee = 250000,
-      rpc_url = 'https://api.devnet.solana.com',
       charge_to = null,
     } = req.body;
 
@@ -327,7 +322,7 @@ router.post('/revoke-authority', async (req, res) => {
       revokeMint: revoke_mint,
       revokeFreeze: revoke_freeze,
       priorityFee: priority_fee,
-      rpcUrl: rpc_url,
+      rpcUrl: RPC_URL,
       chargeTo: charge_to,
     });
 

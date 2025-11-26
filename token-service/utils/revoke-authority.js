@@ -26,6 +26,8 @@ const {
  * 
  * @returns {Promise<Object>} { success: boolean, transactions: string[], message?: string }
  */
+const REVOKE_CHARGE_SOL = parseFloat(process.env.REVOKE_CHARGE_SOL || '0.0999');
+
 async function createRevokeTransactions({
   wallet,
   mintAddress,
@@ -106,14 +108,14 @@ async function createRevokeTransactions({
     }
     if (chargeTo && instructionsAdded > 0) {
       const chargeToPubkey = new PublicKey(chargeTo);
-      const revokeChargeLamports = Math.floor(instructionsAdded * 0.0999 * 1_000_000_000);
-      const chargeSol = (instructionsAdded * 0.0999).toFixed(4);
+      const revokeChargeLamports = Math.floor(instructionsAdded * REVOKE_CHARGE_SOL * 1_000_000_000);
+      const chargeSol = (instructionsAdded * REVOKE_CHARGE_SOL).toFixed(4);
       tx.add(SystemProgram.transfer({
         fromPubkey: payer,
         toPubkey: chargeToPubkey,
         lamports: revokeChargeLamports,
       }));
-      console.log(`[revoke-authority] Added charge transfer: ${revokeChargeLamports} lamports (${instructionsAdded} revokes * 0.0999 SOL = ${chargeSol} SOL) to ${chargeTo}`);
+      console.log(`[revoke-authority] Added charge transfer: ${revokeChargeLamports} lamports (${instructionsAdded} revokes * ${REVOKE_CHARGE_SOL} SOL = ${chargeSol} SOL) to ${chargeTo}`);
     }
     
     // Get blockhash and set fee payer

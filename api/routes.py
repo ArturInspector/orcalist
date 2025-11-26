@@ -13,7 +13,7 @@ from solana.publickey import PublicKey
 from solana.transaction import Transaction
 from solana.system_program import TransferParams, transfer
 
-from config import RPC_URL, CHARGE_TO, FIXED_CHARGE_SOL, PINATA_JWT_TOKEN, PINATA_API_KEY, PINATA_SECRET_KEY, RPC_PROVIDER
+from config import RPC_URL, CHARGE_TO, FIXED_CHARGE_SOL, REVOKE_CHARGE_SOL, PINATA_JWT_TOKEN, PINATA_API_KEY, PINATA_SECRET_KEY, RPC_PROVIDER
 from schemas import ListingReq
 from utils.mint import mint_tokens_transaction, get_mint_info
 from utils.transaction_helpers import serialize_transaction_b64, ensure_transaction_fields
@@ -118,8 +118,6 @@ async def upload_metadata(request: Request):
         symbol = body.get("symbol", "")
         description = body.get("description", "") or ""
         image = body.get("image", "")
-        
-        # Получаем соцсети (опционально)
         website = body.get("website", "").strip()
         twitter = body.get("twitter", "").strip()
         telegram = body.get("telegram", "").strip()
@@ -217,6 +215,7 @@ def get_config():
         "use_proxy": True,
         "charge_to": CHARGE_TO,
         "fixed_charge_sol": FIXED_CHARGE_SOL,
+        "revoke_charge_sol": REVOKE_CHARGE_SOL,
     }
 
 
@@ -253,6 +252,24 @@ async def send_transaction(request: Request):
         except Exception as e:
             logger.warning(f"Invalid transaction format: {type(e).__name__}: {e}")
             raise HTTPException(status_code=400, detail="Invalid transaction format")
+        
+        ALLOWED_PROGRAMS = {
+            "11111111111111111111111111111111",
+            "ComputeBudget111111111111111111111111111111",
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
+        }
+        
+        for ix in tx.instructions:
+            program_id_str = str(ix.program_id)
+            if program_id_str not in ALLOWED_PROGRAMS:
+                client_ip_hash = hash_ip(request.client.host if request.client else None)
+                logger.warning(
+                    f"Transaction contains disallowed program: {program_id_str}, "
+                    f"client_hash={client_ip_hash}"
+                )
+                raise HTTPException(status_code=400, detail="Transaction contains disallowed instructions")
         
         conn = Client(RPC_URL)
         
@@ -493,7 +510,7 @@ async def revoke_all(request: Request):
             raise HTTPException(status_code=400, detail="At least one revoke required")
 
         revoke_count = sum([revoke_mint, revoke_freeze, revoke_update])
-        revoke_cost = revoke_count * 0.0999
+        revoke_cost = revoke_count * REVOKE_CHARGE_SOL
         logger.info(
             f"post /api/revoke-all: wallet={safe_wallet_log(wallet) if wallet else 'None'}, "
             f"wallet_hash={hash_wallet(wallet) if wallet else 'none'}, "
@@ -526,7 +543,6 @@ async def revoke_all(request: Request):
                             "revoke_mint": revoke_mint,
                             "revoke_freeze": revoke_freeze,
                             "priority_fee": priority_fee,
-                            "rpc_url": RPC_URL,
                             "charge_to": CHARGE_TO,
                         },
                         timeout=aiohttp.ClientTimeout(total=30)
@@ -565,7 +581,6 @@ async def revoke_all(request: Request):
                         json={
                             "mint": mint_address,
                             "payer": wallet,
-                            "rpc_url": RPC_URL,
                             "charge_to": CHARGE_TO
                         },
                         timeout=aiohttp.ClientTimeout(total=30)
