@@ -6,7 +6,7 @@ const {
 } = require('../utils/transaction');
 const { createSimpleToken } = require('../utils/transaction-simple');
 const { createBaseToken2022 } = require('../utils/transaction-base');
-const { addMetaplexMetadata } = require('../utils/metaplex-metadata');
+const { addMetaplexMetadata, revokeUpdateAuthority } = require('../utils/metaplex-metadata');
 
 router.post('/create-simple-token', async (req, res) => {
   try {
@@ -246,6 +246,34 @@ router.post('/add-metaplex-metadata', async (req, res) => {
 
   } catch (error) {
     console.error('Error adding metadata:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+router.post('/revoke-update-authority', async (req, res) => {
+  try {
+    const { mint, payer, rpc_url = 'https://api.devnet.solana.com' } = req.body;
+
+    if (!mint || !payer) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Mint and payer are required' 
+      });
+    }
+
+    const result = await revokeUpdateAuthority({
+      mintAddress: mint,
+      payerAddress: payer,
+      rpcUrl: rpc_url,
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('Error revoking update authority:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

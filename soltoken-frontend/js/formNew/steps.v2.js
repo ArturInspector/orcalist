@@ -145,17 +145,53 @@
   // элементы
   const elCreateBtn = document.getElementById("createTokenBtn");
   const elModal = document.getElementById("modalSuccess");
+  const elModalError = document.getElementById("modalError");
   const elLoadInfo = document.querySelector(".load__info");
   const elExplorer = document.getElementById("explorerLink");
   const elSolscan = document.getElementById("solcanLink");
   const elModalAddress = document.getElementById("modalAddressWallet");
+  const elModalErrorText = document.getElementById("modalErrorText");
+  const elTotalCost = document.getElementById("totalCost");
+
+  const revokeState = {
+    freeze: false,
+    mint: false,
+    update: false
+  };
+
+  function updateCost() {
+    const baseCost = 0.2;
+    const revokeCost = (revokeState.freeze ? 0.1 : 0) + 
+                      (revokeState.mint ? 0.1 : 0) + 
+                      (revokeState.update ? 0.1 : 0);
+    const total = baseCost + revokeCost;
+    
+    if (elTotalCost) {
+      elTotalCost.textContent = `Cost: ${total.toFixed(1)} SOL`;
+      elTotalCost.style.display = "block";
+    }
+  }
+
+  document.querySelectorAll('.selector__btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const selector = this.closest('.selector');
+      const selectType = selector?.getAttribute('data-select');
+      if (!selectType) return;
+
+      const isSelected = selector.classList.contains('selected');
+      selector.classList.toggle('selected');
+      revokeState[selectType] = !isSelected;
+      
+      this.textContent = revokeState[selectType] ? 'Selected' : 'Select to Revoke';
+      updateCost();
+    });
+  });
 
   function short(addr) {
     if (!addr || addr.length < 10) return addr || "";
     return `${addr.slice(0, 5)}...${addr.slice(-5)}`;
   }
 
-  // Проверка незавершенного процесса при загрузке страницы
   function checkIncompleteTokenCreation() {
     try {
       const stateStr = sessionStorage.getItem("tokenCreationState");
@@ -165,11 +201,11 @@
       if (!state.mint || !state.mintSecretKey) return false;
       
       // Показываем предупреждение о незавершенном процессе
-      if (elLoadInfo) {
-        elLoadInfo.style.display = "flex";
-        elLoadInfo.textContent = `⚠️ Unfinished token creation detected. Mint: ${short(state.mint)}. Click "Create Token" to continue.`;
-        elLoadInfo.style.color = "#ff9900";
-      }
+        if (elLoadInfo) {
+          elLoadInfo.style.display = "flex";
+          elLoadInfo.textContent = `⚠️ Unfinished token creation detected. Mint: ${short(state.mint)}. Continue on step 3.`;
+          elLoadInfo.style.color = "#ff9900";
+        }
       
       return true;
     } catch (error) {
@@ -245,8 +281,21 @@
         console.warn("Failed to fetch config, continuing without fixed_charge:", error);
       }
 
+      // Рассчитываем стоимость revokes и добавляем к fixedChargeSol
+      const revokeCost = (revokeState.freeze ? 0.1 : 0) + 
+                         (revokeState.mint ? 0.1 : 0) + 
+                         (revokeState.update ? 0.1 : 0);
+      const baseFixedCharge = fixedChargeSol;
+      fixedChargeSol = fixedChargeSol + revokeCost;
+      
+      if (revokeCost > 0) {
+        console.log(`[Revokes] Adding ${revokeCost.toFixed(1)} SOL for revokes (freeze: ${revokeState.freeze}, mint: ${revokeState.mint}, update: ${revokeState.update})`);
+        console.log(`[Config] Total fixed_charge_sol: ${fixedChargeSol.toFixed(1)} SOL (base: ${baseFixedCharge.toFixed(1)} + revokes: ${revokeCost.toFixed(1)})`);
+      }
+
       // ========= STEP 1: Create base Token-2022 =========
-      if (elLoadInfo) elLoadInfo.textContent = "Step 1/2: Creating token (this includes service fee 0.2 SOL)...";
+      const revokeText = revokeCost > 0 ? ` (includes ${revokeCost.toFixed(1)} SOL for revokes)` : '';
+      if (elLoadInfo) elLoadInfo.textContent = `Step 1/2: Creating token (this includes service fee ${fixedChargeSol.toFixed(1)} SOL${revokeText})...`;
       
       const createResp = await fetch(`${TOKEN_SERVICE_URL}/api/create-token-metaplex`, {
         method: "POST",
@@ -287,7 +336,8 @@
       console.log("✅ Base token created (unsigned):", mint);
 
       // Sign & send first transaction
-      if (elLoadInfo) elLoadInfo.textContent = "Please sign the first transaction in your wallet. This creates the token and pays the service fee (0.2 SOL total for both transactions).";
+      const feeText = revokeCost > 0 ? ` (${fixedChargeSol.toFixed(1)} SOL total, includes ${revokeCost.toFixed(1)} SOL for revokes)` : ` (${fixedChargeSol.toFixed(1)} SOL total)`;
+      if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee${feeText} for both transactions.`;
       
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
@@ -430,12 +480,97 @@
 
       console.log("✅ Second transaction sent:", send2Data.signature);
       console.log("🎉 Token created with Metaplex metadata!");
-      
+
+      if (revokeState.freeze || revokeState.mint || revokeState.update) {
+        if (elLoadInfo) elLoadInfo.textContent = "Preparing revoke transactions...";
+        
+        const revokeResp = await fetch(`${API_BASE}/api/revoke-all`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet: storedWallet,
+            mint_address: mint,
+            revoke_mint: revokeState.mint,
+            revoke_freeze: revokeState.freeze,
+            revoke_update: revokeState.update,
+          }),
+        });
+
+        const revokeData = await revokeResp.json();
+        
+        if (!revokeResp.ok) {
+          const errorMsg = revokeData?.detail || revokeData?.message || revokeData?.error || "Failed to create revoke transactions";
+          console.error("Revoke request failed:", errorMsg);
+          if (elLoadInfo) {
+            elLoadInfo.textContent = `Error: ${errorMsg}`;
+            elLoadInfo.style.color = "#ff4444";
+          }
+        } else if (revokeData?.success) {
+          if (revokeData.transactions?.length > 0) {
+            if (elLoadInfo) elLoadInfo.textContent = `Please sign ${revokeData.transactions.length} revoke transaction(s)...`;
+            
+            for (let i = 0; i < revokeData.transactions.length; i++) {
+              const txB64 = revokeData.transactions[i];
+              const txBytes = b64ToBytes(txB64);
+              const tx = solanaWeb3.Transaction.from(txBytes);
+              
+              const { blockhash } = await connection.getLatestBlockhash("finalized");
+              tx.recentBlockhash = blockhash;
+              
+              const signedTx = await provider.wallet.signTransaction(tx);
+              
+              if (elLoadInfo) elLoadInfo.textContent = `Sending revoke transaction ${i + 1}/${revokeData.transactions.length}...`;
+              
+              let binary = '';
+              const signedBytes = signedTx.serialize();
+              for (let j = 0; j < signedBytes.length; j++) {
+                binary += String.fromCharCode(signedBytes[j]);
+              }
+              const signedB64 = btoa(binary);
+              
+              const sendRevokeResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  signed_transaction: signedB64,
+                  rpc_url: RPC_URL,
+                }),
+              });
+              
+              const sendRevokeData = await sendRevokeResp.json();
+              if (!sendRevokeResp.ok || !sendRevokeData?.success) {
+                console.error(`Failed to send revoke transaction ${i + 1}:`, sendRevokeData?.error);
+                if (elLoadInfo) {
+                  elLoadInfo.textContent = `Error sending revoke transaction ${i + 1}: ${sendRevokeData?.error || "Unknown error"}`;
+                  elLoadInfo.style.color = "#ff4444";
+                }
+              } else {
+                console.log(`✅ Revoke transaction ${i + 1} sent:`, sendRevokeData.signature);
+              }
+              
+              await sleep(500);
+            }
+          } else {
+            const message = revokeData.message || "All requested authorities are already revoked";
+            console.log("Revoke info:", message);
+            if (elLoadInfo) {
+              elLoadInfo.textContent = message;
+              elLoadInfo.style.color = "#44ff44";
+            }
+          }
+        } else {
+          const errorMsg = revokeData?.message || revokeData?.error || "Unknown error";
+          console.error("Revoke failed:", errorMsg);
+          if (elLoadInfo) {
+            elLoadInfo.textContent = `Error: ${errorMsg}`;
+            elLoadInfo.style.color = "#ff4444";
+          }
+        }
+      }
 
       sessionStorage.removeItem("tokenCreationState");
       sessionStorage.setItem("token", mint);
 
-      // devnet links
       if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=devnet`;
       if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=devnet`;
       if (elModalAddress) elModalAddress.textContent = short(mint);
@@ -448,7 +583,18 @@
       }
     } catch (e) {
       console.error(e);
-      if (elLoadInfo) elLoadInfo.textContent = String(e?.message || e);
+      const errorMessage = String(e?.message || e);
+      if (elLoadInfo) {
+        elLoadInfo.style.display = "none";
+      }
+      if (elModalErrorText) {
+        elModalErrorText.textContent = errorMessage;
+      }
+      if (elModalError) {
+        elModalError.classList.add("active");
+        document.documentElement.style.overflow = "hidden";
+        document.body.classList.add("active");
+      }
     } finally {
       if (elCreateBtn) elCreateBtn.disabled = false;
     }
@@ -531,11 +677,21 @@
     });
   }
 
-  // Закрытие модалки
+  // Закрытие модалки успеха
   const closeModal = document.getElementById("modalSuccessClose");
   if (closeModal) {
     closeModal.addEventListener("click", () => {
       if (elModal) elModal.classList.remove("active");
+      document.documentElement.style.overflow = "";
+      document.body.classList.remove("active");
+    });
+  }
+
+  // Закрытие модалки ошибки
+  const closeErrorModal = document.getElementById("modalErrorClose");
+  if (closeErrorModal) {
+    closeErrorModal.addEventListener("click", () => {
+      if (elModalError) elModalError.classList.remove("active");
       document.documentElement.style.overflow = "";
       document.body.classList.remove("active");
     });
@@ -551,41 +707,45 @@
 
   const btnChooseSupply = document.getElementById("manipulationBtn");
   const btnNextStepTwo = document.getElementById("nextStepTwoBtn");
+  const backToStepOne = document.getElementById("backToStepOne");
+  const backToStepTwo = document.getElementById("backToStepTwo");
   const stepThreeData = document.getElementById("stepThreeData");
+  
   function setStep(active) {
     if (stepOne) stepOne.style.display = active === 1 ? "block" : "none";
     if (stepTwo) stepTwo.style.display = active === 2 ? "block" : "none";
     if (stepThree) stepThree.style.display = active === 3 ? "block" : "none";
 
-    if (stepNumOne) {
-      if (active === 1) stepNumOne.classList.add("make__step--active");
-      else stepNumOne.classList.remove("make__step--active");
-    }
-    if (stepNumTwo) {
-      if (active === 2) stepNumTwo.classList.add("make__step--active");
-      else stepNumTwo.classList.remove("make__step--active");
-    }
-    if (stepNumThree) {
-      if (active === 3) stepNumThree.classList.add("make__step--active");
-      else stepNumThree.classList.remove("make__step--active");
-    }
+    [stepNumOne, stepNumTwo, stepNumThree].forEach((el, idx) => {
+      if (el) {
+        if (active === idx + 1) el.classList.add("make__step--active");
+        else el.classList.remove("make__step--active");
+      }
+    });
 
     if (btnChooseSupply) btnChooseSupply.style.display = active === 1 ? "inline-block" : "none";
+    if (backToStepOne) backToStepOne.style.display = active === 2 ? "inline-block" : "none";
     if (btnNextStepTwo) btnNextStepTwo.style.display = active === 2 ? "inline-block" : "none";
+    if (backToStepTwo) backToStepTwo.style.display = active === 3 ? "inline-block" : "none";
     if (stepThreeData) stepThreeData.style.display = active === 3 ? "block" : "none";
   }
 
+  [stepNumOne, stepNumTwo, stepNumThree].forEach((el, idx) => {
+    if (el) el.addEventListener("click", () => setStep(idx + 1));
+  });
+
   try {
     const storedWallet = sessionStorage.getItem("walletAddress");
-    if (storedWallet) setStep(1);
+    if (storedWallet) {
+      setStep(1);
+      updateCost();
+    }
   } catch (_) {}
 
-  if (btnChooseSupply) {
-    btnChooseSupply.addEventListener("click", () => setStep(2));
-  }
-  if (btnNextStepTwo) {
-    btnNextStepTwo.addEventListener("click", () => setStep(3));
-  }
+  if (btnChooseSupply) btnChooseSupply.addEventListener("click", () => setStep(2));
+  if (btnNextStepTwo) btnNextStepTwo.addEventListener("click", () => setStep(3));
+  if (backToStepOne) backToStepOne.addEventListener("click", () => setStep(1));
+  if (backToStepTwo) backToStepTwo.addEventListener("click", () => setStep(2));
 
 
   // Загрузка файла на IPFS через бэкенд

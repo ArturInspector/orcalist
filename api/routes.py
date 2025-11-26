@@ -19,6 +19,7 @@ from utils.mint import mint_tokens_transaction, get_mint_info
 from utils.transaction_helpers import serialize_transaction_b64, ensure_transaction_fields
 from utils.security_funcs import safe_wallet_log, hash_wallet, hash_ip, safe_rpc_url
 from utils.simulation import simulate_transaction, log_simulation_result
+from utils.authority import create_revoke_transactions
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
@@ -455,6 +456,88 @@ async def api_listing(req: ListingReq):
             exc_info=True
         )
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/api/revoke-all")
+async def revoke_all(request: Request):
+    try:
+        body = await request.json()
+        wallet = body.get("wallet")
+        mint_address = body.get("mint_address")
+        revoke_mint = body.get("revoke_mint", False)
+        revoke_freeze = body.get("revoke_freeze", False)
+        revoke_update = body.get("revoke_update", False)
+        priority_fee = int(body.get("priority_fee", 250000))
+
+        if not wallet or not mint_address:
+            raise HTTPException(status_code=400, detail="wallet and mint_address required")
+
+        if not any([revoke_mint, revoke_freeze, revoke_update]):
+            raise HTTPException(status_code=400, detail="At least one revoke required")
+
+        revoke_count = sum([revoke_mint, revoke_freeze, revoke_update])
+        revoke_cost = revoke_count * 0.1
+        logger.info(
+            f"post /api/revoke-all: wallet={safe_wallet_log(wallet) if wallet else 'None'}, "
+            f"wallet_hash={hash_wallet(wallet) if wallet else 'none'}, "
+            f"mint={mint_address[:8] if mint_address else 'None'}..., "
+            f"revokes=[mint={revoke_mint}, freeze={revoke_freeze}, update={revoke_update}], "
+            f"count={revoke_count}, expected_cost={revoke_cost:.1f} SOL"
+        )
+
+        conn = Client(RPC_URL)
+        mint_info = await get_mint_info(conn, mint_address)
+        if not mint_info.get("success"):
+            raise HTTPException(status_code=400, detail="Mint not found")
+
+        use_token_2022 = mint_info.get("use_token_2022", True)
+        transactions = []
+
+        if revoke_mint or revoke_freeze:
+            try:
+                logger.info(f"Creating revoke transactions: mint={revoke_mint}, freeze={revoke_freeze}, use_token_2022={use_token_2022}")
+                result = await create_revoke_transactions(
+                    conn, wallet, mint_address, revoke_mint, revoke_freeze,
+                    priority_fee, use_token_2022
+                )
+                logger.info(f"create_revoke_transactions result: success={result.get('success')}, message={result.get('message')}, transactions_count={len(result.get('transactions', []))}")
+                if not result.get("success"):
+                    raise HTTPException(status_code=500, detail=result.get("message"))
+                for tx in result.get("transactions", []):
+                    try:
+                        tx_b64 = serialize_transaction_b64(tx)
+                        transactions.append(tx_b64)
+                    except Exception as e:
+                        logger.error(f"Error serializing revoke transaction: {type(e).__name__}: {e}", exc_info=True)
+                        raise HTTPException(status_code=500, detail=f"Error serializing transaction: {e}")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error in revoke_mint/freeze block: {type(e).__name__}: {e}", exc_info=True)
+                raise
+
+        if revoke_update:
+            token_service_url = os.getenv("TOKEN_SERVICE_URL", "http://localhost:3001")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{token_service_url}/api/revoke-update-authority",
+                    json={"mint": mint_address, "payer": wallet, "rpc_url": RPC_URL}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("success") and data.get("transaction"):
+                            transactions.append(data["transaction"])
+
+        logger.info(
+            f"revoke-all completed: mint={mint_address[:8] if mint_address else 'None'}..., "
+            f"transactions_created={len(transactions)}"
+        )
+        return {"success": True, "transactions": transactions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in revoke-all: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def setup_routes(limiter):

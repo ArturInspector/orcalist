@@ -1,6 +1,6 @@
 const { PublicKey, Keypair } = require('@solana/web3.js');
 const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
-const { createV1, TokenStandard } = require('@metaplex-foundation/mpl-token-metadata');
+const { createV1, updateV1, findMetadataPda, TokenStandard } = require('@metaplex-foundation/mpl-token-metadata');
 const {
   createSignerFromKeypair,
   signerIdentity,
@@ -299,5 +299,45 @@ async function addMetaplexMetadata({ mintAddress, mintSecretKey, payerAddress, n
   };
 }
 
-module.exports = { addMetaplexMetadata, estimateMetadataCost };
+async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl }) {
+  const umi = createUmi(rpcUrl);
+  const mint = publicKey(mintAddress);
+  const payer = publicKey(payerAddress);
+  const payerWeb3Js = new PublicKey(payerAddress);
+
+  const dummySigner = {
+    publicKey: payer,
+    signMessage: async () => { throw new Error('Should not be called'); },
+    signTransaction: async () => { throw new Error('Should not be called'); },
+    signAllTransactions: async () => { throw new Error('Should not be called'); },
+  };
+  umi.use(signerIdentity(dummySigner));
+
+  const [metadataPda] = findMetadataPda(umi, { mint });
+
+  const builder = updateV1(umi, {
+    mint,
+    authority: payer,
+    newUpdateAuthority: null,
+    isMutable: false,
+  });
+
+  const builderWithBlockhash = await builder.setLatestBlockhash(umi);
+  const transaction = await builderWithBlockhash.build(umi);
+  const web3LegacyTransaction = toWeb3JsLegacyTransaction(transaction);
+  web3LegacyTransaction.feePayer = payerWeb3Js;
+  web3LegacyTransaction.signatures = [];
+
+  const serialized = web3LegacyTransaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
+
+  return {
+    success: true,
+    transaction: Buffer.from(serialized).toString('base64'),
+  };
+}
+
+module.exports = { addMetaplexMetadata, estimateMetadataCost, revokeUpdateAuthority };
 

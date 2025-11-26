@@ -33,8 +33,16 @@ def add_priority_fee(transaction: Transaction, micro_lamports: int) -> None:
         keys=[]  # SetComputeUnitPrice не требует аккаунтов
     )
     
-    # Добавляем в начало транзакции (ComputeBudget инструкции должны быть первыми)
-    transaction.instructions.insert(0, instruction)
+    # Добавляем priority fee инструкцию в начало
+    # Если instructions - tuple, конвертируем в list
+    if isinstance(transaction.instructions, tuple):
+        transaction.instructions = list(transaction.instructions)
+    # Если это list, используем insert для добавления в начало
+    if isinstance(transaction.instructions, list):
+        transaction.instructions.insert(0, instruction)
+    else:
+        # Fallback: используем add() если instructions не list и не tuple
+        transaction.add(instruction)
 
 
 def _read_env_pubkey(var_name: str) -> PublicKey:

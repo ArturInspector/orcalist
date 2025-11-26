@@ -1670,7 +1670,7 @@ html, body, .wrapper {
 }
 
 .make__bottom-right .btn-xe {
-  height: 100%;
+  align-self: flex-start;
 }
 
 .make__cost {

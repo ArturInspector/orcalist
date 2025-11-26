@@ -158,7 +158,7 @@
             <div class="make__revoke">
               <h3 class="make__subtitle">Modify Creator Information</h3>
               <p class="make__description">
-                Change the information of the creator in the metadata. By default, it is TokenStart
+                Increase trust by revoking authorities. Each option adds 0.1 SOL to the total cost.
               </p>
               <div class="selectors">
                 <div class="selector" data-select="freeze">
@@ -181,9 +181,9 @@
                   <p class="selector__text">
                     Mint Authority allows you to mint more supply of your token.
                   </p>
-                  <button class="selector__btn btn-xe" data-btn="revoke" type="button">Select to Revoke</button>
+                  <button class="selector__btn btn-xe" data-btn="mint" type="button">Select to Revoke</button>
                 </div>
-                <div class="selector" data-select="mint">
+                <div class="selector" data-select="update">
                   <div class="selector__head">
                     <img src="img/icons/3.svg" width="48" height="48" alt="decor icon">
                     <span class="selector__cost">+0.1 SOL</span>
@@ -192,7 +192,7 @@
                   <p class="selector__text">
                     Update Authority allows you to update the token metadata about your token.
                   </p>
-                  <button class="selector__btn btn-xe" data-btn="mint" type="button">Select to Revoke</button>
+                  <button class="selector__btn btn-xe" data-btn="update" type="button">Select to Revoke</button>
                 </div>
               </div>
             </div>
@@ -218,7 +218,7 @@
             <button class="btn-xe" type="button" id="manipulationBtn">Choose Supply</button>
             <button class="btn-xe" type="button" id="nextStepTwoBtn" style="display: none">Next</button>
             <div class="make__bottom-right" id="stepThreeData" style="display:none;">
-              <p class="make__cost" style="display:none;">Cost: 0.02</p>
+              <p class="make__cost" id="totalCost" style="display:none;">Cost: 0.2 SOL</p>
               <button class="btn-xe" id="createTokenBtn" type="button">Create Token</button>
             </div>
           </div>
@@ -254,13 +254,17 @@
         <img src="img/link.svg" alt="link icon">
         View on Solscan
       </a>
-      <a class="modal-xe__link" id="createLiquidityPool" href="javascript:void(0)">
+      <a class="modal-xe__link" id="createLiquidityPool" href="https://raydium.io/liquidity/create-pool/" target="_blank">
+        <img src="img/link.svg" alt="link icon">
         Create Liquidity Pool
       </a>
       <input class="input" id="solValue" placeholder="Amount sol value" style="display: none; height: 52px;">
       <input class="input" id="tokenAmountPool" placeholder="Counts tokens for pool" style="display: none; height: 52px;">
       <button class="btn-xe" id="createPool" type="button" style="display: none; height: 52px;">Create Pool</button>
     </div>
+    <p class="modal-xe__info">
+      Use the token address above to add it to your wallet
+    </p>
   </div>
   <div class="modal-xe" id="modalError">
     <button class="modal-xe__close" id="modalErrorClose">
@@ -272,12 +276,11 @@
       <img src="img/icons/error.svg" width="36" height="36" alt="success icon">
       <h3 class="modal-xe__title">Error Creating Token</h3>
     </div>
-    <p class="modal-xe__error">
-      Balance check disabled for testing.
-      Required balance: 0 SOL
+    <p class="modal-xe__error" id="modalErrorText">
+      An error occurred while creating the token.
     </p>
     <p class="modal-xe__info">
-      Use the token address above to add it to your wallet
+      Retry, or reach out to support for further assistance.
     </p>
   </div>
   <div class="token">
