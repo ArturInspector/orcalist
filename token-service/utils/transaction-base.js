@@ -155,6 +155,10 @@ async function createBaseToken2022({
   // Расходы первой транзакции (которые пользователь платит дополнительно к fixed_charge)
   const FIRST_TX_RENT_LAMPORTS = lamports; // Rent для mint аккаунта
   
+  // Буфер для покрытия комиссии транзакции (когда симуляция падает)
+  // Покрывает комиссию одной транзакции (~0.002 SOL = 2,000,000 lamports)
+  const TX_FEE_BUFFER = 2_000_000;
+  
   // Симулируем транзакцию С transfer инструкцией, чтобы получить реальную network fee
   // Сначала рассчитываем примерный adjustedChargeLamports для тестовой транзакции
   let firstTxFeeLamports = 5_000; // Fallback значение
@@ -204,10 +208,12 @@ async function createBaseToken2022({
           firstTxFeeLamports = simulation.value.fee || 5_000;
           console.log(`[createBaseToken2022] ✅ Real network fee from simulation (WITH transfer): ${firstTxFeeLamports} lamports (${firstTxFeeLamports / 1_000_000_000} SOL)`);
         } else {
-          console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee: ${firstTxFeeLamports} lamports`);
+          console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee + buffer: ${firstTxFeeLamports + TX_FEE_BUFFER} lamports`);
+          firstTxFeeLamports = firstTxFeeLamports + TX_FEE_BUFFER;
         }
       } catch (simError) {
-        console.warn(`[createBaseToken2022] ⚠️ Simulation error, using fallback fee: ${simError.message}`);
+        console.warn(`[createBaseToken2022] ⚠️ Simulation error, using fallback fee + buffer: ${firstTxFeeLamports + TX_FEE_BUFFER} lamports`);
+        firstTxFeeLamports = firstTxFeeLamports + TX_FEE_BUFFER;
       }
       
       // Теперь рассчитываем adjustedChargeLamports с правильной fee

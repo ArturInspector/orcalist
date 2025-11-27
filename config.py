@@ -12,7 +12,7 @@ if HELIUS_API_KEY:
         RPC_URL = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
     else:
         RPC_URL = f"https://devnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
-    RPC_PROVIDER = "Helius"
+        RPC_PROVIDER = "Helius"
 else:
     RPC_URL = (
         os.getenv("SOLANA_RPC_URL")

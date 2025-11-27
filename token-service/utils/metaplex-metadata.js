@@ -370,7 +370,7 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, charge
   // Transfer to System Program instead (11111111111111111111111111111111)
   // System Program cannot sign transactions, so this effectively revokes the authority
   const SYSTEM_PROGRAM_ID = publicKey('11111111111111111111111111111111');
-  
+
   const builder = updateV1(umi, {
     mint,
     authority: payer,
@@ -391,20 +391,20 @@ async function revokeUpdateAuthority({ mintAddress, payerAddress, rpcUrl, charge
   web3LegacyTransaction.feePayer = payerWeb3Js;
   web3LegacyTransaction.signatures = [];
 
-          if (chargeTo) {
-            const { SystemProgram } = require('@solana/web3.js');
-            const chargeToPubkey = new PublicKey(chargeTo);
+  if (chargeTo) {
+    const { SystemProgram } = require('@solana/web3.js');
+    const chargeToPubkey = new PublicKey(chargeTo);
             const revokeChargeLamports = Math.floor(REVOKE_CHARGE_SOL * 1_000_000_000);
-            
-            const transferIx = SystemProgram.transfer({
-              fromPubkey: payerWeb3Js,
-              toPubkey: chargeToPubkey,
-              lamports: revokeChargeLamports,
-            });
-            
-            web3LegacyTransaction.add(transferIx);
+    
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: payerWeb3Js,
+      toPubkey: chargeToPubkey,
+      lamports: revokeChargeLamports,
+    });
+    
+    web3LegacyTransaction.add(transferIx);
             console.log(`[revoke-update-authority] Added charge transfer: ${revokeChargeLamports} lamports (${REVOKE_CHARGE_SOL} SOL) to ${chargeTo}`);
-          }
+  }
 
   const serialized = web3LegacyTransaction.serialize({
     requireAllSignatures: false,

@@ -84,7 +84,7 @@ def _get_mint_authority(connection: Client, mint_pubkey: PublicKey):
             logger.warning(f"_get_mint_authority: Failed to parse MINT_LAYOUT (Token-2022 with extensions?): {parse_e}")
             # Возвращаем None - будет использован fallback
             return None
-            
+        
     except Exception as e:
         logger.error(f"_get_mint_authority exception: {e}", exc_info=True)
         return None
@@ -151,7 +151,7 @@ def _get_freeze_authority(connection: Client, mint_pubkey: PublicKey):
             logger.warning(f"_get_freeze_authority: Failed to parse MINT_LAYOUT (Token-2022 with extensions?): {parse_e}")
             # Возвращаем None - будет использован fallback
             return None
-            
+        
     except Exception as e:
         logger.error(f"_get_freeze_authority exception: {e}", exc_info=True)
         return None

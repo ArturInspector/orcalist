@@ -2,7 +2,6 @@
 /// steps.js — devnet версия, без ES-модулей
 (() => {
   // ========= CONFIG =========
-  const RPC_URL = "https://api.devnet.solana.com"; // devnet
   const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
   // Определяем базовый URL API автоматически.
   // 1) meta[name="api-base"] имеет приоритет
@@ -28,7 +27,7 @@
 
   // web3 глобаль приходит из <script src="...iife.min.js">
   const solanaWeb3 = window.solanaWeb3;
-  const { Connection, PublicKey, Transaction } = solanaWeb3;
+  const { PublicKey, Transaction } = solanaWeb3;
 
   // ========= HELPERS =========
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -59,54 +58,13 @@
     throw new Error("Wallet is not connected (phantom/solflare).");
   }
 
-  async function freshBlockhash(connection) {
-    const { blockhash } = await connection.getLatestBlockhash("finalized");
-    return blockhash;
-  }
-
-  // Перед подписью: всем транзам ставим feePayer и свежий blockhash (devnet)
-  async function prepareUnsignedTxs(base64List, connection, feePayer) {
-    const blockhash = await freshBlockhash(connection);
-    const payer = new PublicKey(feePayer);
-    return base64List.map((b64) => {
-      const tx = Transaction.from(b64ToBytes(b64));
-      tx.feePayer = payer;
-      tx.recentBlockhash = blockhash;
-      return tx;
-    });
-  }
-
   async function signAll(provider, txs) {
-    // и Phantom, и Solflare имеют signAllTransactions
     return provider.wallet.signAllTransactions(txs);
   }
 
-  async function sendAndConfirm(connection, signedTx) {
-    const sig = await connection.sendRawTransaction(signedTx.serialize(), {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
-    // devnet подтверждение
-    await connection.confirmTransaction(sig, "confirmed");
-    return sig;
-  }
-
-  async function sendAll(connection, signedTxs) {
-    const sigs = [];
-    for (const stx of signedTxs) {
-      const sig = await sendAndConfirm(connection, stx);
-      sigs.push(sig);
-      await sleep(150);
-    }
-    return sigs;
-  }
-
-  // Универсалка под /api/proceed и /api/listing
   async function signAndSendFromApiResponse(apiData, feePayer) {
-    const connection = new Connection(RPC_URL, "confirmed");
     const provider = await getProvider();
 
-    // Соберём список base64-транзакций
     let base64List = [];
     if (Array.isArray(apiData?.updatedTx) && apiData.updatedTx.length) {
       base64List = apiData.updatedTx;
@@ -116,28 +74,46 @@
       throw new Error("API did not return tx/updatedTx.");
     }
 
-    // 1) feePayer + свежий blockhash с DEVNET
-    let unsigned = await prepareUnsignedTxs(base64List, connection, feePayer);
+    const payer = new PublicKey(feePayer);
+    const unsigned = base64List.map((b64) => {
+      const tx = Transaction.from(b64ToBytes(b64));
+      tx.feePayer = payer;
+      return tx;
+    });
 
-    // 2) подпись кошельком
-    let signed = await signAll(provider, unsigned);
+    const signed = await signAll(provider, unsigned);
 
-    // 3) отправка (+ 1 ретрай при “blockhash not found/expired”)
-    try {
-      return await sendAll(connection, signed);
-    } catch (err) {
-      const msg = String(err?.message || err);
-      const bhExpired =
-        /blockhash not found/i.test(msg) ||
-        /Transaction expired/i.test(msg) ||
-        /Blockhash not found/i.test(msg);
-      if (bhExpired) {
-        unsigned = await prepareUnsignedTxs(base64List, connection, feePayer);
-        signed = await signAll(provider, unsigned);
-        return await sendAll(connection, signed);
+    const sigs = [];
+    for (const stx of signed) {
+      let binary = '';
+      const signedBytes = stx.serialize();
+      for (let i = 0; i < signedBytes.length; i++) {
+        binary += String.fromCharCode(signedBytes[i]);
       }
-      throw err;
+      const signedB64 = btoa(binary);
+
+      const sendResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signed_transaction: signedB64,
+        }),
+      });
+
+      if (!sendResp.ok) {
+        const errorData = await sendResp.json();
+        throw new Error(errorData?.error || `Backend returned status ${sendResp.status}`);
+      }
+
+      const sendData = await sendResp.json();
+      if (!sendData?.success) {
+        throw new Error(sendData?.error || "Failed to send transaction");
+      }
+
+      sigs.push(sendData.signature);
+      await sleep(150);
     }
+    return sigs;
   }
 
   // ========= UI HOOKS =========
@@ -183,9 +159,9 @@
     
     if (elTotalCost) {
       if (revokeCostDisplay > 0) {
-        elTotalCost.textContent = `Cost: ${fixedChargeSol.toFixed(4)} SOL + ${revokeCostDisplay.toFixed(4)} SOL (revokes) = ${total.toFixed(4)} SOL`;
+        elTotalCost.textContent = `Cost: ${fixedChargeSol.toFixed(2)} SOL + ${revokeCostDisplay.toFixed(2)} SOL (revokes) = ${total.toFixed(2)} SOL`;
       } else {
-        elTotalCost.textContent = `Cost: ${total.toFixed(4)} SOL`;
+        elTotalCost.textContent = `Cost: ${total.toFixed(2)} SOL`;
       }
       elTotalCost.style.display = "block";
     }
@@ -272,7 +248,7 @@
       console.log("[onCreateToken] Description from form:", description);
       console.log("[onCreateToken] Supply from form:", supply);
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
-      
+
       // Собираем соцсети
       const website = document.getElementById("website")?.value?.trim() || "";
       const twitter = document.getElementById("twitter")?.value?.trim() || "";
@@ -290,7 +266,6 @@
       const savedTokenSymbol = tokenSymbol.trim();
       const savedIpfsLogo = ipfsLogo;
 
-      const connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
       const provider = await getProvider();
 
       let chargeTo = null;
@@ -370,10 +345,6 @@
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
       
-      // Обновляем blockhash перед подписью (может устареть между созданием и подписью)
-      const { blockhash } = await connection.getLatestBlockhash("finalized");
-      tx1.recentBlockhash = blockhash;
-      
       const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
       tx1.partialSign(mintKeypair);
         
@@ -388,17 +359,30 @@
       }
       const signedTx1Base64 = btoa(binary1);
       
-      const send1Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          signed_transaction: signedTx1Base64,
-        }),
-      });
-
-      const send1Data = await send1Resp.json();
-      if (!send1Resp.ok || !send1Data?.success) {
-        throw new Error(send1Data?.error || "Failed to send first transaction");
+      let send1Resp;
+      let send1Data;
+      try {
+        send1Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            signed_transaction: signedTx1Base64,
+          }),
+        });
+        
+        if (!send1Resp.ok) {
+          throw new Error(`Backend returned status ${send1Resp.status}: ${send1Resp.statusText}`);
+        }
+        
+        send1Data = await send1Resp.json();
+        if (!send1Data?.success) {
+          throw new Error(send1Data?.error || "Failed to send first transaction");
+        }
+      } catch (error) {
+        if (error.message?.includes('fetch') || error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
+          throw new Error("Backend is not responding. Please try again later.");
+        }
+        throw error;
       }
 
       console.log("✅ First transaction sent:", send1Data.signature);
@@ -479,10 +463,6 @@
       const tx2Bytes = b64ToBytes(metadataData.transaction);
       const tx2 = solanaWeb3.Transaction.from(tx2Bytes);
       
-      // Обновляем blockhash перед подписью (может устареть между созданием и подписью)
-      const { blockhash: blockhash2 } = await connection.getLatestBlockhash("finalized");
-      tx2.recentBlockhash = blockhash2;
-      
       const signedTx2 = await provider.wallet.signTransaction(tx2);
       
       if (elLoadInfo) elLoadInfo.textContent = "Sending second transaction...";
@@ -494,17 +474,30 @@
       }
       const signedTx2Base64 = btoa(binary2);
       
-      const send2Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          signed_transaction: signedTx2Base64,
-        }),
-      });
-
-      const send2Data = await send2Resp.json();
-      if (!send2Resp.ok || !send2Data?.success) {
-        throw new Error(send2Data?.error || "Failed to send second transaction");
+      let send2Resp;
+      let send2Data;
+      try {
+        send2Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            signed_transaction: signedTx2Base64,
+          }),
+        });
+        
+        if (!send2Resp.ok) {
+          throw new Error(`Backend returned status ${send2Resp.status}: ${send2Resp.statusText}`);
+        }
+        
+        send2Data = await send2Resp.json();
+        if (!send2Data?.success) {
+          throw new Error(send2Data?.error || "Failed to send second transaction");
+        }
+      } catch (error) {
+        if (error.message?.includes('fetch') || error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
+          throw new Error("Backend is not responding. Please try again later.");
+        }
+        throw error;
       }
 
       console.log("✅ Second transaction sent:", send2Data.signature);
@@ -634,43 +627,26 @@
                 });
               }
               
-              const { blockhash } = await connection.getLatestBlockhash("finalized");
-              console.log(`🔗 New blockhash: ${blockhash}`);
-              tx.recentBlockhash = blockhash;
-              console.log(`✅ Blockhash updated in transaction`);
+              // Проверка транзакции
               
-              // Проверка после изменения blockhash
-              const tokenInstructionsAfter = tx.instructions.filter(ix => {
-                const programId = ix.programId.toBase58();
-                return programId === TOKEN_2022_PROGRAM_ID || programId === TOKEN_PROGRAM_ID;
-              });
-              console.log(`🔍 Token Program instructions after blockhash update:`, {
-                found: tokenInstructionsAfter.length,
-                instructionsCount: tx.instructions.length
-              });
-              
-              if (tokenInstructionsAfter.length === 0 && (revokeState.mint || revokeState.freeze)) {
-                console.error(`❌ CRITICAL: Token Program instructions lost after blockhash update!`);
-              }
-              
+              let signedTx;
               try {
                 console.log(`✍️ Signing transaction...`);
-                const signedTx = await provider.wallet.signTransaction(tx);
+                signedTx = await provider.wallet.signTransaction(tx);
                 console.log(`✅ Transaction signed:`, {
                   signatures: signedTx.signatures.map(sig => sig.publicKey.toBase58()),
                   signatureCount: signedTx.signatures.length
                 });
               } catch (error) {
-                // Обработка отмены пользователем
                 if (error.code === 4001 || error.message?.includes('User rejected') || error.message?.includes('User cancelled')) {
                   console.log('❌ User rejected transaction');
                   if (elLoadInfo) {
                     elLoadInfo.textContent = 'Transaction cancelled by user';
                     elLoadInfo.style.color = "#ff9900";
                   }
-                  return; // Прерываем процесс, не показываем ошибку
+                  return;
                 }
-                throw error; // Пробрасываем другие ошибки
+                throw error;
               }
               
               if (elLoadInfo) elLoadInfo.textContent = `Sending revoke transaction ${i + 1}/${revokeData.transactions.length}...`;
@@ -684,28 +660,47 @@
               const signedB64 = btoa(binary);
               console.log(`📤 Sending transaction to ${TOKEN_SERVICE_URL}/api/send-transaction`);
               
-              const sendRevokeResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  signed_transaction: signedB64,
-                }),
-              });
-              
-              console.log(`📥 Response status: ${sendRevokeResp.status} ${sendRevokeResp.statusText}`);
-              const sendRevokeData = await sendRevokeResp.json();
-              console.log(`📥 Response data:`, sendRevokeData);
-              
-              if (!sendRevokeResp.ok || !sendRevokeData?.success) {
-                const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || "Unknown error";
+              let sendRevokeResp;
+              let sendRevokeData;
+              try {
+                sendRevokeResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    signed_transaction: signedB64,
+                  }),
+                });
+                
+                if (!sendRevokeResp.ok) {
+                  throw new Error(`Backend returned status ${sendRevokeResp.status}: ${sendRevokeResp.statusText}`);
+                }
+                
+                console.log(`📥 Response status: ${sendRevokeResp.status} ${sendRevokeResp.statusText}`);
+                sendRevokeData = await sendRevokeResp.json();
+                console.log(`📥 Response data:`, sendRevokeData);
+                
+                if (!sendRevokeData?.success) {
+                  throw new Error(sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || "Failed to send revoke transaction");
+                }
+              } catch (error) {
+                if (error.message?.includes('fetch') || error.message?.includes('network') || error.message?.includes('Failed to fetch') || error.message?.includes('Backend returned status')) {
+                  const errorMsg = error.message?.includes('Backend returned status') ? error.message : "Backend is not responding. Please try again later.";
+                  console.error(`❌ Backend error for revoke transaction ${i + 1}:`, errorMsg);
+                  if (elLoadInfo) {
+                    elLoadInfo.textContent = `Error: ${errorMsg}`;
+                    elLoadInfo.style.color = "#ff4444";
+                  }
+                  throw error;
+                }
+                
+                const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || error.message || "Unknown error";
                 console.error(`❌ Failed to send revoke transaction ${i + 1}:`, {
-                  status: sendRevokeResp.status,
-                  statusText: sendRevokeResp.statusText,
+                  status: sendRevokeResp?.status,
+                  statusText: sendRevokeResp?.statusText,
                   error: errorMsg,
                   fullResponse: sendRevokeData
                 });
                 
-                // Сохраняем информацию о неудачной попытке revoke для возможности повтора
                 const revokeErrorInfo = {
                   mint: mint,
                   wallet: storedWallet,
@@ -727,22 +722,19 @@
                     </div>
                   `;
                 }
-                
-                // Не прерываем процесс - токен уже создан, revoke можно повторить позже
-                // Но логируем ошибку для пользователя
-              } else {
-                console.log(`✅ Revoke transaction ${i + 1} sent successfully:`, {
-                  signature: sendRevokeData.signature,
-                  success: sendRevokeData.success
+                return;
+              }
+              
+              console.log(`✅ Revoke transaction ${i + 1} sent successfully:`, {
+                signature: sendRevokeData.signature,
+                success: sendRevokeData.success
+              });
+              
+              if (sendRevokeData.signature) {
+                console.log(`🔍 Check transaction on explorer:`, {
+                  devnet: `https://explorer.solana.com/tx/${sendRevokeData.signature}?cluster=devnet`,
+                  solscan: `https://solscan.io/tx/${sendRevokeData.signature}?cluster=devnet`
                 });
-                
-                // Проверяем, что транзакция действительно подтверждена
-                if (sendRevokeData.signature) {
-                  console.log(`🔍 Check transaction on explorer:`, {
-                    devnet: `https://explorer.solana.com/tx/${sendRevokeData.signature}?cluster=devnet`,
-                    solscan: `https://solscan.io/tx/${sendRevokeData.signature}?cluster=devnet`
-                  });
-                }
               }
               
               await sleep(500);
