@@ -354,9 +354,9 @@ async function createBaseToken2022({
     console.warn('[createBaseToken2022] Simulation failed (non-critical):', simError.message);
   }
   
-  // mint keypair signs the transaction
-  transaction.partialSign(mintKeypair);
-  console.log('[createBaseToken2022] Mint keypair signed transaction');
+  // DO NOT sign mintKeypair here - user must sign first (Phantom requirement)
+  // mintKeypair signature will be added after user signs on frontend
+  console.log('[createBaseToken2022] Transaction ready for user signing (mintKeypair will sign after user)');
   
   const serializedTx = transaction.serialize({
     requireAllSignatures: false,
@@ -364,7 +364,7 @@ async function createBaseToken2022({
   });
   
   console.log('[createBaseToken2022] Transaction serialized, size:', serializedTx.length);
-  console.log('[createBaseToken2022] Base token transaction ready');
+  console.log('[createBaseToken2022] Base token transaction ready (unsigned)');
   
   return {
     transaction: serializedTx.toString('base64'),

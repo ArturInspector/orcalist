@@ -86,9 +86,9 @@ async function createSimpleToken({
   const { blockhash } = await connection.getLatestBlockhash('confirmed');
   transaction.recentBlockhash = blockhash;
 
-  // Sign with mint keypair
-  transaction.partialSign(mintKeypair);
-  console.log('Transaction partially signed with mint keypair');
+  // DO NOT sign mintKeypair here - user must sign first (Phantom requirement)
+  // mintKeypair signature will be added after user signs on frontend
+  console.log('Transaction ready for user signing (mintKeypair will sign after user)');
 
   // Serialize
   const serialized = transaction.serialize({
