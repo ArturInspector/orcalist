@@ -7,6 +7,8 @@ load_dotenv()
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
 NETWORK = os.getenv("NETWORK", "devnet").strip().lower()
 
+
+RPC_PROVIDER = "Custom"  # значение по умолчанию
 if HELIUS_API_KEY:
     RPC_PROVIDER = "Helius"
     if NETWORK == "mainnet":

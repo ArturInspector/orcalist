@@ -33,25 +33,8 @@
     }
   })();
 
-  const TOKEN_SERVICE_URL = (() => {
-    try {
-      const loc = window.location;
-      const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
-      // Если фронтенд на порту 3000, Token Service на порту 3001 того же хоста
-      if (port === 3000) {
-        return `${loc.protocol}//${loc.hostname}:3001`;
-      }
-      // Если фронтенд на стандартных портах (80/443), используем относительный путь
-      // Nginx проксирует /token-api/ на порт 3001
-      if (port === 80 || port === 443) {
-        return "/token-api"; // Относительный путь - nginx проксирует на порт 3001
-      }
-      // Для локальной разработки используем localhost:3001
-      return "http://localhost:3001";
-    } catch (_e) {
-      return "http://localhost:3001";
-    }
-  })();
+  // Убрали TOKEN_SERVICE_URL - используем API_BASE для всех запросов
+  // Все запросы идут через /api/, Python API проксирует на Token Service при необходимости
 
   // web3 глобаль приходит из <script src="...iife.min.js">
   const solanaWeb3 = window.solanaWeb3;
@@ -120,7 +103,7 @@
       }
       const signedB64 = btoa(binary);
 
-      const sendResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+      const sendResp = await fetch(`${API_BASE}/api/send-transaction`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -328,7 +311,7 @@
         elLoadInfo.textContent = `Step 1/2: Creating token (service fee: ${fixedChargeSol.toFixed(1)} SOL${revokeText})...`;
       }
       
-      const createResp = await fetch(`${TOKEN_SERVICE_URL}/api/create-token-metaplex`, {
+      const createResp = await fetch(`${API_BASE}/api/create-token-metaplex`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -393,7 +376,7 @@
       let send1Resp;
       let send1Data;
       try {
-        send1Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        send1Resp = await fetch(`${API_BASE}/api/send-transaction`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -468,7 +451,7 @@
         throw new Error("Token name and symbol are required for metadata");
       }
       
-      const metadataResp = await fetch(`${TOKEN_SERVICE_URL}/api/add-metaplex-metadata`, {
+      const metadataResp = await fetch(`${API_BASE}/api/add-metaplex-metadata`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -508,7 +491,7 @@
       let send2Resp;
       let send2Data;
       try {
-        send2Resp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+        send2Resp = await fetch(`${API_BASE}/api/send-transaction`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -689,12 +672,12 @@
                 binary += String.fromCharCode(signedBytes[j]);
               }
               const signedB64 = btoa(binary);
-              console.log(`📤 Sending transaction to ${TOKEN_SERVICE_URL}/api/send-transaction`);
+              console.log(`📤 Sending transaction to ${API_BASE}/api/send-transaction`);
               
               let sendRevokeResp;
               let sendRevokeData;
               try {
-                sendRevokeResp = await fetch(`${TOKEN_SERVICE_URL}/api/send-transaction`, {
+                sendRevokeResp = await fetch(`${API_BASE}/api/send-transaction`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
