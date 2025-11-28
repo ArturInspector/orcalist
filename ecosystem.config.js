@@ -6,10 +6,6 @@ module.exports = {
       script: "/home/lyudskoe/projects/kwork/orcalist/venv/bin/python",
       args: "-m uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
       env: {
-        HELIUS_API_KEY: "",
-        NETWORK: "devnet",
-        RPC_URL: "https://api.devnet.solana.com",
-        CHARGE_TO: "GxdD2CM13WMgV7ikvsX6zPi6JbNoWN88RZbSNMfXsCuM",
         FIXED_CHARGE_SOL: "0.2",
         REVOKE_CHARGE_SOL: "0.0999",
         TOKEN_SERVICE_URL: "http://localhost:3001"

@@ -21,9 +21,8 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*",
-        "https://tokenstart.app",
-        "https://www.tokenstart.app",
+        "https://tokenstart.pro",
+        "https://www.tokenstart.pro",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
