@@ -2,7 +2,6 @@
 /// steps.js — devnet версия, без ES-модулей
 (() => {
   // ========= CONFIG =========
-  const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
   // Определяем базовый URL API автоматически.
   // 1) meta[name="api-base"] имеет приоритет (если не пустой)
   // 2) если фронт работает на 3000 → шьём :8000 на тот же host
@@ -31,6 +30,26 @@
       return "";
     } catch (_e) {
       return "";
+    }
+  })();
+
+  const TOKEN_SERVICE_URL = (() => {
+    try {
+      const loc = window.location;
+      const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
+      // Если фронтенд на порту 3000, Token Service на порту 3001 того же хоста
+      if (port === 3000) {
+        return `${loc.protocol}//${loc.hostname}:3001`;
+      }
+      // Если фронтенд на стандартных портах (80/443), используем относительный путь
+      // Nginx проксирует /token-api/ на порт 3001
+      if (port === 80 || port === 443) {
+        return "/token-api"; // Относительный путь - nginx проксирует на порт 3001
+      }
+      // Для локальной разработки используем localhost:3001
+      return "http://localhost:3001";
+    } catch (_e) {
+      return "http://localhost:3001";
     }
   })();
 
