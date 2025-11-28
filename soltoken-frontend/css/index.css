@@ -1665,16 +1665,21 @@ html, body, .wrapper {
 }
 
 .make__bottom-right {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
   flex-shrink: 0;
   margin-left: auto;
   min-width: fit-content;
+  padding-right: 148px;
 }
 
 .make__bottom-right .btn-xe {
-  align-self: flex-start;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   flex-shrink: 0;
   min-width: 140px;
 }

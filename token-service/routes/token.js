@@ -9,7 +9,22 @@ const { createBaseToken2022 } = require('../utils/transaction-base');
 const { addMetaplexMetadata, revokeUpdateAuthority } = require('../utils/metaplex-metadata');
 const { createRevokeTransactions } = require('../utils/revoke-authority');
 
-const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
+const HELIUS_API_KEY = (process.env.HELIUS_API_KEY || '').trim();
+const NETWORK = (process.env.NETWORK || 'devnet').trim().toLowerCase();
+
+let RPC_URL;
+if (HELIUS_API_KEY) {
+  if (NETWORK === 'mainnet') {
+    RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+  } else {
+    RPC_URL = `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+  }
+} else {
+  RPC_URL = (process.env.SOLANA_RPC_URL || process.env.RPC_URL || 'https://api.devnet.solana.com').trim();
+}
+
+console.log(`[token-service] RPC_URL: ${RPC_URL.replace(/\?api-key=[^&]+/, '?api-key=***')}`);
+
 const REVOKE_CHARGE_SOL = parseFloat(process.env.REVOKE_CHARGE_SOL || '0.0999');
 
 router.post('/create-simple-token', async (req, res) => {

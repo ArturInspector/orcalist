@@ -1,4 +1,12 @@
 // Token Service - Microservice for Token-2022 operations
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+console.log('[token-service] Environment variables:');
+console.log('[token-service] HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? process.env.HELIUS_API_KEY.substring(0, 20) + '...' : 'NOT SET');
+console.log('[token-service] NETWORK:', process.env.NETWORK || 'NOT SET');
+console.log('[token-service] RPC_URL:', process.env.RPC_URL || 'NOT SET');
+
 const express = require('express');
 const cors = require('cors');
 const tokenRoutes = require('./routes/token');

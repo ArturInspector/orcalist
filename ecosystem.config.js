@@ -28,7 +28,6 @@ module.exports = {
       env: {
         TOKEN_SERVICE_PORT: "3001",
         NODE_ENV: "production",
-        RPC_URL: "https://api.devnet.solana.com",
         REVOKE_CHARGE_SOL: "0.0999"
       },
       max_restarts: 10,
