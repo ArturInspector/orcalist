@@ -4,21 +4,30 @@
   // ========= CONFIG =========
   const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
   // Определяем базовый URL API автоматически.
-  // 1) meta[name="api-base"] имеет приоритет
+  // 1) meta[name="api-base"] имеет приоритет (если не пустой)
   // 2) если фронт работает на 3000 → шьём :8000 на тот же host
-  // 3) иначе — тот же origin (пустая строка = относительные пути)
+  // 3) если фронт на стандартных портах (80/443) → пробуем :8000 на том же хосте
+  // 4) иначе — тот же origin (пустая строка = относительные пути, работает если nginx проксирует /api/)
   const API_BASE = (() => {
     try {
       const meta = document.querySelector('meta[name="api-base"]');
       const fromMeta = meta && meta.getAttribute('content');
-      if (fromMeta && typeof fromMeta === 'string') {
+      // Используем meta только если он не пустой
+      if (fromMeta && typeof fromMeta === 'string' && fromMeta.trim()) {
         return fromMeta.replace(/\/$/, '');
       }
       const loc = window.location;
       const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
+      // Если фронтенд на порту 3000, API на порту 8000 того же хоста
       if (port === 3000) {
         return `${loc.protocol}//${loc.hostname}:8000`;
       }
+      // Если фронтенд на стандартных портах (80/443), пробуем API на порту 8000
+      // Это для случая, когда фронтенд через nginx, а API напрямую на 8000
+      if (port === 80 || port === 443) {
+        return `${loc.protocol}//${loc.hostname}:8000`;
+      }
+      // Иначе используем относительный путь (работает если nginx проксирует /api/)
       return "";
     } catch (_e) {
       return "";
@@ -345,10 +354,13 @@
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
       
-      const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
-      tx1.partialSign(mintKeypair);
-        
+      // IMPORTANT: User signs FIRST (Phantom requirement for single signer)
+      // Then we add mintKeypair signature after user signs
       const signedTx1 = await provider.wallet.signTransaction(tx1);
+      
+      // Now add mintKeypair signature after user signed
+      const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
+      signedTx1.partialSign(mintKeypair);
       
       if (elLoadInfo) elLoadInfo.textContent = "Sending first transaction...";
       
