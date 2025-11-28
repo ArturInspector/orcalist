@@ -49,58 +49,71 @@ async function simulateTransaction(transaction, rpcUrl) {
     // или как Buffer
     let simulation;
     
-    // Попытка 1: Передаем транзакцию напрямую с replaceRecentBlockhash
+    // Попытка 1: Передаем транзакцию напрямую с replaceRecentBlockhash (Solflare-compatible)
     try {
-      console.log('[simulateTransaction] Attempt 1: Direct transaction with replaceRecentBlockhash');
+      console.log('[simulateTransaction] Attempt 1: Direct transaction with replaceRecentBlockhash (sigVerify:false)');
       simulation = await connection.simulateTransaction(transaction, {
         replaceRecentBlockhash: true,
         sigVerify: false,
       });
-      console.log('[simulateTransaction] ✅ Simulation succeeded (direct with replaceRecentBlockhash)');
+      console.log('[simulateTransaction] ✅ Simulation succeeded (Solflare-compatible)');
     } catch (error1) {
       console.warn('[simulateTransaction] Attempt 1 failed:', error1.message);
       
-      // Попытка 2: Передаем как Buffer (сериализованную)
+      // Попытка 1b: Попробуем с sigVerify: true (Phantom-compatible)
       try {
-        console.log('[simulateTransaction] Attempt 2: Serialized transaction as Buffer');
-        const serialized = transaction.serialize({
-          requireAllSignatures: false,
-          verifySignatures: false,
-        });
-        
-        simulation = await connection.simulateTransaction(serialized, {
+        console.log('[simulateTransaction] Attempt 1b: Direct transaction with sigVerify:true (Phantom-compatible)');
+        simulation = await connection.simulateTransaction(transaction, {
           replaceRecentBlockhash: true,
-          sigVerify: false,
+          sigVerify: true,
         });
-        console.log('[simulateTransaction] ✅ Simulation succeeded (as Buffer)');
-      } catch (error2) {
-        console.warn('[simulateTransaction] Attempt 2 failed:', error2.message);
+        console.log('[simulateTransaction] ✅ Simulation succeeded (Phantom-compatible)');
+      } catch (error1b) {
+        console.warn('[simulateTransaction] Attempt 1b failed:', error1b.message);
         
-        // Попытка 3: Создаем новую транзакцию из сериализованной и обновляем blockhash
+        // Попытка 2: Передаем как Buffer (сериализованную)
         try {
-          console.log('[simulateTransaction] Attempt 3: New transaction from serialized with fresh blockhash');
+          console.log('[simulateTransaction] Attempt 2: Serialized transaction as Buffer');
           const serialized = transaction.serialize({
             requireAllSignatures: false,
             verifySignatures: false,
           });
           
-          const { blockhash } = await connection.getLatestBlockhash('finalized');
-          const newTx = SolanaTransaction.from(serialized);
-          newTx.recentBlockhash = blockhash;
-          newTx.feePayer = transaction.feePayer;
-          
-          simulation = await connection.simulateTransaction(newTx, {
-            replaceRecentBlockhash: false,
+          simulation = await connection.simulateTransaction(serialized, {
+            replaceRecentBlockhash: true,
             sigVerify: false,
           });
-          console.log('[simulateTransaction] ✅ Simulation succeeded (new transaction with fresh blockhash)');
-        } catch (error3) {
-          console.error('[simulateTransaction] ❌ All attempts failed:', {
-            attempt1: error1.message,
-            attempt2: error2.message,
-            attempt3: error3.message
-          });
-          throw error3;
+          console.log('[simulateTransaction] ✅ Simulation succeeded (as Buffer)');
+        } catch (error2) {
+          console.warn('[simulateTransaction] Attempt 2 failed:', error2.message);
+          
+          // Попытка 3: Создаем новую транзакцию из сериализованной и обновляем blockhash
+          try {
+            console.log('[simulateTransaction] Attempt 3: New transaction from serialized with fresh blockhash');
+            const serialized = transaction.serialize({
+              requireAllSignatures: false,
+              verifySignatures: false,
+            });
+            
+            const { blockhash } = await connection.getLatestBlockhash('finalized');
+            const newTx = SolanaTransaction.from(serialized);
+            newTx.recentBlockhash = blockhash;
+            newTx.feePayer = transaction.feePayer;
+            
+            simulation = await connection.simulateTransaction(newTx, {
+              replaceRecentBlockhash: false,
+              sigVerify: false,
+            });
+            console.log('[simulateTransaction] ✅ Simulation succeeded (new transaction with fresh blockhash)');
+          } catch (error3) {
+            console.error('[simulateTransaction] ❌ All attempts failed:', {
+              attempt1: error1.message,
+              attempt1b: error1b.message,
+              attempt2: error2.message,
+              attempt3: error3.message
+            });
+            throw error3;
+          }
         }
       }
     }
@@ -119,7 +132,8 @@ async function simulateTransaction(transaction, rpcUrl) {
     }
     
     if (simulation.value.err) {
-      console.error('[simulateTransaction] Simulation error:', simulation.value.err);
+      console.error('[simulateTransaction] ⚠️ SIMULATION ERROR (Phantom will show warning):', JSON.stringify(simulation.value.err));
+      console.error('[simulateTransaction] This may cause Phantom to show security warnings!');
       return null;
     }
     

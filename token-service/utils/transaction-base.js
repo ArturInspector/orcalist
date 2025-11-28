@@ -199,15 +199,32 @@ async function createBaseToken2022({
         // Подписываем только mint keypair (как в реальной транзакции)
         testTransaction.partialSign(mintKeypair);
         
-        const simulation = await connection.simulateTransaction(testTransaction, {
-          replaceRecentBlockhash: true,
-          sigVerify: false,
-        });
+        // Try simulation with sigVerify: false first (Solflare-compatible)
+        let simulation = null;
+        try {
+          simulation = await connection.simulateTransaction(testTransaction, {
+            replaceRecentBlockhash: true,
+            sigVerify: false,
+          });
+        } catch (err) {
+          // Try with sigVerify: true (Phantom-compatible)
+          try {
+            simulation = await connection.simulateTransaction(testTransaction, {
+              replaceRecentBlockhash: true,
+              sigVerify: true,
+            });
+          } catch (err2) {
+            console.warn(`[createBaseToken2022] ⚠️ Both simulation attempts failed for fee calculation`);
+          }
+        }
         
         if (simulation?.value && !simulation.value.err) {
           firstTxFeeLamports = simulation.value.fee || 5_000;
           console.log(`[createBaseToken2022] ✅ Real network fee from simulation (WITH transfer): ${firstTxFeeLamports} lamports (${firstTxFeeLamports / 1_000_000_000} SOL)`);
         } else {
+          if (simulation?.value?.err) {
+            console.warn(`[createBaseToken2022] ⚠️ Simulation error for fee calculation:`, JSON.stringify(simulation.value.err));
+          }
           console.warn(`[createBaseToken2022] ⚠️ Simulation failed, using fallback fee + buffer: ${firstTxFeeLamports + TX_FEE_BUFFER} lamports`);
           firstTxFeeLamports = firstTxFeeLamports + TX_FEE_BUFFER;
         }
@@ -250,16 +267,46 @@ async function createBaseToken2022({
   console.log('[createBaseToken2022] Transaction blockhash:', blockhash);
   console.log('[createBaseToken2022] Transaction feePayer:', payer.toBase58());
   
-  // simulation of the transaction to check the real costs (as Solflare does)
+  // simulation of the transaction to check the real costs (compatible with Solflare and Phantom)
   try {
-    console.log('[createBaseToken2022] 🔍 Simulating transaction (as Solflare does before showing to user)...');
-    const simulation = await connection.simulateTransaction(transaction, {
-      replaceRecentBlockhash: true,
-      sigVerify: false,
-    });
+    console.log('[createBaseToken2022] 🔍 Simulating transaction (for wallet compatibility check)...');
+    
+    // Try simulation with sigVerify: false first (Solflare-compatible)
+    let simulation = null;
+    let simulationError = null;
+    
+    try {
+      simulation = await connection.simulateTransaction(transaction, {
+        replaceRecentBlockhash: true,
+        sigVerify: false,
+      });
+    } catch (err) {
+      simulationError = err;
+      console.warn('[createBaseToken2022] Simulation with sigVerify:false failed, trying sigVerify:true (Phantom-compatible)...');
+      
+      // Try with sigVerify: true (Phantom-compatible)
+      try {
+        simulation = await connection.simulateTransaction(transaction, {
+          replaceRecentBlockhash: true,
+          sigVerify: true,
+        });
+        console.log('[createBaseToken2022] ✅ Simulation succeeded with sigVerify:true (Phantom-compatible)');
+      } catch (err2) {
+        console.warn('[createBaseToken2022] Both simulation attempts failed:', err2.message);
+        throw err2;
+      }
+    }
     
     if (simulation && simulation.value) {
-      console.log('[createBaseToken2022] === SIMULATION RESULT (what Solflare sees) ===');
+      // Check for simulation errors (Phantom shows warnings if err is not null)
+      if (simulation.value.err) {
+        console.error('[createBaseToken2022] ⚠️ SIMULATION ERROR (Phantom will show warning):', JSON.stringify(simulation.value.err));
+        console.error('[createBaseToken2022] This may cause Phantom to show security warnings!');
+      } else {
+        console.log('[createBaseToken2022] ✅ Simulation successful (no errors)');
+      }
+      
+      console.log('[createBaseToken2022] === SIMULATION RESULT ===');
       console.log('[createBaseToken2022] Units consumed:', simulation.value.unitsConsumed);
       const fee = simulation.value.fee || 0;
       console.log('[createBaseToken2022] Network fee:', fee, 'lamports =', fee / 1_000_000_000, 'SOL');
@@ -283,7 +330,6 @@ async function createBaseToken2022({
         
         const totalChangeSol = Math.abs(totalBalanceChange) / 1_000_000_000;
         console.log(`[createBaseToken2022] 💰 TOTAL USER PAYMENT: ${Math.abs(totalBalanceChange)} lamports = ${totalChangeSol} SOL`);
-        console.log(`[createBaseToken2022] ⚠️  This is what Solflare will show to user for FIRST transaction!`);
         
         // check the expected costs
         const expectedFixedCharge = adjustedChargeLamports;
