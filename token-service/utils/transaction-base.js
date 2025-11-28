@@ -64,6 +64,31 @@ async function createBaseToken2022({
   }
   console.log('[createBaseToken2022] Required lamports:', lamports);
   
+  // Проверяем баланс аккаунта перед созданием транзакции
+  let balance;
+  try {
+    balance = await connection.getBalance(payer);
+    console.log(`[createBaseToken2022] Account balance: ${balance} lamports (${balance / 1_000_000_000} SOL)`);
+    
+    // Оцениваем минимальную стоимость транзакции (rent + fee + service fee)
+    const estimatedFee = 5000; // Примерная комиссия сети
+    const estimatedCost = lamports + estimatedFee + (fixedChargeSol > 0 ? Math.floor(fixedChargeSol * 1_000_000_000) : 0);
+    
+    if (balance < estimatedCost) {
+      const balanceSol = balance / 1_000_000_000;
+      const requiredSol = estimatedCost / 1_000_000_000;
+      throw new Error(
+        `Insufficient balance. Account has ${balanceSol.toFixed(4)} SOL, but needs at least ${requiredSol.toFixed(4)} SOL ` +
+        `(rent: ${lamports / 1_000_000_000} SOL + fee: ~0.000005 SOL + service fee: ${fixedChargeSol} SOL)`
+      );
+    }
+  } catch (error) {
+    if (error.message.includes('Insufficient balance')) {
+      throw error;
+    }
+    console.warn(`[createBaseToken2022] Failed to check balance, continuing anyway: ${error.message}`);
+  }
+  
   const transaction = new Transaction();
   
   const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({

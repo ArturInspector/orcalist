@@ -146,16 +146,17 @@
     update: false
   };
 
+  // Захардкоженные значения (не зависят от API)
   let fixedChargeSol = 0.2;
   let revokeChargeSol = 0.0999;
 
   async function loadConfig() {
+    // Загружаем только charge_to, остальное захардкожено
     try {
       const configResp = await fetch(`${API_BASE}/api/config`);
       if (configResp.ok) {
         const config = await configResp.json();
-        fixedChargeSol = config.fixed_charge_sol || 0.2;
-        revokeChargeSol = config.revoke_charge_sol || 0.0999;
+        // fixedChargeSol и revokeChargeSol захардкожены выше
         updateCost();
       }
     } catch (error) {
@@ -280,19 +281,19 @@
       const provider = await getProvider();
 
       let chargeTo = null;
-      let fixedChargeSol = 0;
-      let revokeChargeSol = 0.0999;
+      // Захардкоженные значения
+      const fixedChargeSol = 0.2;
+      const revokeChargeSol = 0.0999;
       try {
         const configResp = await fetch(`${API_BASE}/api/config`);
         if (configResp.ok) {
           const config = await configResp.json();
           chargeTo = config.charge_to || null;
-          fixedChargeSol = config.fixed_charge_sol || 0;
-          revokeChargeSol = config.revoke_charge_sol || 0.0999;
+          // fixedChargeSol и revokeChargeSol захардкожены выше
           console.log(`[Config] charge_to: ${chargeTo}, fixed_charge_sol: ${fixedChargeSol}, revoke_charge_sol: ${revokeChargeSol}`);
         }
       } catch (error) {
-        console.warn("Failed to fetch config, continuing without fixed_charge:", error);
+        console.warn("Failed to fetch config, continuing without charge_to:", error);
       }
 
       const revokeCostReal = (revokeState.freeze ? revokeChargeSol : 0) + 
