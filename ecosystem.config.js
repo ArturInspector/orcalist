@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: "api",
-      cwd: "/home/lyudskoe/projects/kwork/orcalist",
-      script: "/home/lyudskoe/projects/kwork/orcalist/venv/bin/python",
+      cwd: "/home/root/tokenstart/orcalist",
+      script: "/home/root/tokenstart/orcalist/venv/bin/python",
       args: "-m uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
       env: {
         FIXED_CHARGE_SOL: "0.2",
@@ -15,7 +15,7 @@ module.exports = {
     },
     {
       name: "token-service",
-      cwd: "/home/lyudskoe/projects/kwork/orcalist/token-service",
+      cwd: "/home/root/tokenstart/orcalist/token-service",
       script: "server.js",
       instances: 1,
       autorestart: true,
@@ -31,8 +31,9 @@ module.exports = {
     },
     {
       name: "front",
-      script: "/home/lyudskoe/.npm-global/bin/pm2",
-      args: "serve /home/lyudskoe/projects/kwork/orcalist/soltoken-frontend --port 3000 --spa",
+      script: "serve",
+      args: "-s soltoken-frontend -l 3000",
+      cwd: "/home/root/tokenstart/orcalist",
       exec_mode: "fork",
       env: {
         NODE_ENV: "production"

@@ -2,11 +2,6 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-console.log('[token-service] Environment variables:');
-console.log('[token-service] HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? process.env.HELIUS_API_KEY.substring(0, 20) + '...' : 'NOT SET');
-console.log('[token-service] NETWORK:', process.env.NETWORK || 'NOT SET');
-console.log('[token-service] RPC_URL:', process.env.RPC_URL || 'NOT SET');
-
 const express = require('express');
 const cors = require('cors');
 const tokenRoutes = require('./routes/token');
@@ -56,8 +51,15 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Token Service running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`[token-service] Token Service running on port ${PORT}`);
+  console.log(`[token-service] Health check: http://localhost:${PORT}/health`);
+  console.log('[token-service] HELIUS_API_KEY loaded:', !!process.env.HELIUS_API_KEY);
+  console.log('[token-service] NETWORK loaded:', !!process.env.NETWORK);
+  console.log('[token-service] RPC_URL loaded:', !!process.env.RPC_URL);
+});
+
+app.on('error', (err) => {
+  console.error('[token-service] Server error:', err);
 });
 
 module.exports = app;
