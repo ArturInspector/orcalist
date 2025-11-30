@@ -83,7 +83,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       sessionStorage.setItem("walletProvider", "phantom");
       updateUIAfterConnect(walletAddress);
     } catch (error) {
-      console.log("Ошибка подключения Phantom:", error);
+      // Connection error - silently fail
     }
   }
 
@@ -102,7 +102,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       sessionStorage.setItem("walletProvider", "solflare");
       updateUIAfterConnect(walletAddress);
     } catch (error) {
-      console.log("Ошибка подключения Solflare:", error);
+      // Connection error - silently fail
     }
   }
 
@@ -118,7 +118,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       document.execCommand("copy");
     } catch (err) {
-      console.log("error copy clipboard");
+      // Copy failed - silently ignore
     }
     document.body.removeChild(textArea);
   }
@@ -175,11 +175,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   walletConnectPhantom?.addEventListener("click", connectPhantom);
   walletConnectSolflare?.addEventListener("click", connectSolflare);
 
-  // Подписки на события (для отладки)
+  // Подписки на события Phantom (без логирования)
   const phantom = getPhantom();
   if (phantom) {
-    phantom.on?.("connect", (pubkey) => console.log("Phantom connected:", pubkey?.toString()));
-    phantom.on?.("disconnect", () => console.log("Phantom disconnected"));
-    phantom.on?.("accountChanged", (pubkey) => console.log("Phantom accountChanged:", pubkey?.toString()));
+    phantom.on?.("connect", () => {});
+    phantom.on?.("disconnect", () => {});
+    phantom.on?.("accountChanged", () => {});
   }
 });

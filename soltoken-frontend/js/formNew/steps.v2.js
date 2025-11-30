@@ -9,29 +9,45 @@
   // 4) иначе — тот же origin (пустая строка = относительные пути)
   const API_BASE = (() => {
     try {
+      // Проверяем meta tag (только для локальной разработки)
       const meta = document.querySelector('meta[name="api-base"]');
       const fromMeta = meta && meta.getAttribute('content');
-      // Используем meta только если он не пустой
       if (fromMeta && typeof fromMeta === 'string' && fromMeta.trim()) {
         return fromMeta.replace(/\/$/, '');
       }
-      const loc = window.location;
+      
+      // Для локальной разработки
       const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
       // Если фронтенд на порту 3000, API на порту 8000 того же хоста
       if (port === 3000) {
-        return `${loc.protocol}//${loc.hostname}:8000`;
+        const apiUrl = `${loc.protocol}//${loc.hostname}:8000`;
+        return apiUrl;
       }
+      
       // Если фронтенд на стандартных портах (80/443), используем относительный путь
-      // Nginx проксирует все запросы (включая /api/) на порт 8000
       if (port === 80 || port === 443) {
         return ""; // Относительный путь - nginx проксирует
       }
-      // Иначе используем относительный путь
+      
+      // По умолчанию относительный путь
       return "";
     } catch (_e) {
       return "";
     }
   })();
+
+  // Определяем сеть (devnet/mainnet) для explorer ссылок
+  const NETWORK = (() => {
+    // Проверяем hostname - если содержит devnet или localhost, то devnet
+    if (window.location.hostname.includes('devnet') ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1') {
+      return 'devnet';
+    }
+    // По умолчанию mainnet для продакшена
+    return 'mainnet';
+  })();
+
 
   // Убрали TOKEN_SERVICE_URL - используем API_BASE для всех запросов
   // Все запросы идут через /api/, Python API проксирует на Token Service при необходимости
@@ -60,7 +76,6 @@
       if (!window.solflare.isConnected) await window.solflare.connect();
       return { name: "solflare", wallet: window.solflare, isPhantom: false, isSolflare: true };
     }
-    // Фоллбек: если провайдер не выбран — пробуем Phantom
     if (window.solana?.isPhantom) {
       if (!window.solana.isConnected) await window.solana.connect();
       sessionStorage.setItem("walletProvider", "phantom");
@@ -141,9 +156,9 @@
   const elTotalCost = document.getElementById("totalCost");
 
   const revokeState = {
-    freeze: false,
-    mint: false,
-    update: false
+    freeze: true,   // по умолчанию все выбраны
+    mint: true,
+    update: true
   };
 
   // Захардкоженные значения (не зависят от API)
@@ -160,7 +175,7 @@
         updateCost();
       }
     } catch (error) {
-      console.warn("Failed to load config:", error);
+      // Config load failed - continue with defaults
     }
   }
 
@@ -181,6 +196,19 @@
 
   loadConfig();
 
+  document.querySelectorAll('.selector').forEach(selector => {
+    const selectType = selector.getAttribute('data-select');
+    if (selectType && revokeState[selectType]) {
+      selector.classList.add('selected');
+      const btn = selector.querySelector('.selector__btn');
+      if (btn) {
+        btn.textContent = 'Selected';
+        btn.classList.add('selected');
+      }
+    }
+  });
+  updateCost();
+
   document.querySelectorAll('.selector__btn').forEach(btn => {
     btn.addEventListener('click', function() {
       const selector = this.closest('.selector');
@@ -192,6 +220,7 @@
       revokeState[selectType] = !isSelected;
       
       this.textContent = revokeState[selectType] ? 'Selected' : 'Select to Revoke';
+      this.classList.toggle('selected', revokeState[selectType]);
       updateCost();
     });
   });
@@ -209,7 +238,6 @@
       const state = JSON.parse(stateStr);
       if (!state.mint || !state.mintSecretKey) return false;
       
-      // Показываем предупреждение о незавершенном процессе
         if (elLoadInfo) {
           elLoadInfo.style.display = "flex";
           elLoadInfo.textContent = `⚠️ Unfinished token creation detected. Mint: ${short(state.mint)}. Continue on step 3.`;
@@ -218,7 +246,6 @@
       
       return true;
     } catch (error) {
-      console.error("Error checking incomplete token creation:", error);
       return false;
     }
   }
@@ -257,8 +284,6 @@
       const tokenName = document.getElementById("tokenName")?.value || "";
       const tokenSymbol = document.getElementById("tokenSymbol")?.value || "";
       const description = document.getElementById("description")?.value || "";
-      console.log("[onCreateToken] Description from form:", description);
-      console.log("[onCreateToken] Supply from form:", supply);
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
 
       // Собираем соцсети
@@ -290,10 +315,9 @@
           const config = await configResp.json();
           chargeTo = config.charge_to || null;
           // fixedChargeSol и revokeChargeSol захардкожены выше
-          console.log(`[Config] charge_to: ${chargeTo}, fixed_charge_sol: ${fixedChargeSol}, revoke_charge_sol: ${revokeChargeSol}`);
         }
       } catch (error) {
-        console.warn("Failed to fetch config, continuing without charge_to:", error);
+        // Config fetch failed - continue with defaults
       }
 
       const revokeCostReal = (revokeState.freeze ? revokeChargeSol : 0) + 
@@ -303,9 +327,6 @@
                                 (revokeState.mint ? revokeChargeSol : 0) + 
                                 (revokeState.update ? revokeChargeSol : 0);
       
-      if (revokeCostReal > 0) {
-        console.log(`[Revokes] Will charge ${revokeCostReal.toFixed(4)} SOL separately for revokes (freeze: ${revokeState.freeze}, mint: ${revokeState.mint}, update: ${revokeState.update})`);
-      }
 
     if (elLoadInfo) {
         const revokeText = revokeCostDisplay > 0 ? ` (revokes will be charged separately: ${revokeCostDisplay.toFixed(1)} SOL)` : '';
@@ -348,7 +369,6 @@
         decimals: decimals,
       }));
       
-      console.log("✅ Base token created (unsigned):", mint);
 
       // Sign & send first transaction
       const revokeText = revokeCostDisplay > 0 ? ` Revokes (${revokeCostDisplay.toFixed(1)} SOL) will be charged separately.` : '';
@@ -400,7 +420,6 @@
         throw error;
       }
 
-      console.log("✅ First transaction sent:", send1Data.signature);
       
       // Обновляем состояние - первая транзакция отправлена
       const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
@@ -433,15 +452,12 @@
       const metaData = await metaResp.json();
       if (metaResp.ok && metaData?.uri) {
         metadataUri = metaData.uri;
-        console.log("✅ Metadata JSON uploaded to IPFS:", metadataUri);
-        
         // Обновляем состояние - метаданные загружены
         const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
         currentState.step = "metadata_uploaded";
         currentState.metadataUri = metadataUri;
         sessionStorage.setItem("tokenCreationState", JSON.stringify(currentState));
-      } else {
-        console.warn("⚠️ Failed to upload metadata JSON, continuing without URI");
+      }
       }
 
       // ========= STEP 3: Add Metaplex metadata =========
@@ -470,7 +486,6 @@
         throw new Error(metadataData?.error || "Failed to create metadata transaction");
       }
 
-      console.log("✅ Metadata transaction created (unsigned)");
 
       // Sign & send second transaction
       if (elLoadInfo) elLoadInfo.textContent = "Please sign the second transaction in your wallet. This adds metadata (cost already included in 0.2 SOL service fee).";
@@ -515,19 +530,8 @@
         throw error;
       }
 
-      console.log("✅ Second transaction sent:", send2Data.signature);
-      console.log("🎉 Token created with Metaplex metadata!");
-
       if (revokeState.freeze || revokeState.mint || revokeState.update) {
         if (elLoadInfo) elLoadInfo.textContent = "Preparing revoke transactions...";
-        
-        console.log("Requesting revoke transactions:", {
-          wallet: storedWallet,
-          mint: mint,
-          revoke_mint: revokeState.mint,
-          revoke_freeze: revokeState.freeze,
-          revoke_update: revokeState.update
-        });
         
         const revokeResp = await fetch(`${API_BASE}/api/revoke-all`, {
           method: "POST",
@@ -541,53 +545,22 @@
           }),
         });
 
-        console.log(`📥 Revoke response status: ${revokeResp.status} ${revokeResp.statusText}`);
         const revokeData = await revokeResp.json();
-        console.log(`📥 Revoke response data:`, revokeData);
         
         if (!revokeResp.ok) {
           const errorMsg = revokeData?.detail || revokeData?.message || revokeData?.error || "Failed to create revoke transactions";
-          console.error("❌ Revoke request failed:", {
-            status: revokeResp.status,
-            statusText: revokeResp.statusText,
-            error: errorMsg,
-            fullResponse: revokeData
-          });
           if (elLoadInfo) {
             elLoadInfo.textContent = `Error: ${errorMsg}`;
             elLoadInfo.style.color = "#ff4444";
           }
         } else if (revokeData?.success) {
-          console.log("📋 Revoke response:", {
-            success: revokeData.success,
-            transactionsCount: revokeData.transactions?.length || 0,
-            message: revokeData.message
-          });
-          
           if (revokeData.transactions?.length > 0) {
             if (elLoadInfo) elLoadInfo.textContent = `Please sign ${revokeData.transactions.length} revoke transaction(s)...`;
             
             for (let i = 0; i < revokeData.transactions.length; i++) {
-              console.log(`\n🔄 Processing revoke transaction ${i + 1}/${revokeData.transactions.length}`);
-              
               const txB64 = revokeData.transactions[i];
-              console.log(`📦 Transaction base64 length: ${txB64.length} chars`);
-              
               const txBytes = b64ToBytes(txB64);
-              console.log(`📦 Transaction bytes length: ${txBytes.length} bytes`);
-              
               const tx = solanaWeb3.Transaction.from(txBytes);
-              console.log(`📝 Transaction after deserialize:`, {
-                instructionsCount: tx.instructions.length,
-                instructionPrograms: tx.instructions.map((ix, idx) => ({
-                  index: idx,
-                  programId: ix.programId.toBase58(),
-                  keysCount: ix.keys.length,
-                  dataLength: ix.data.length
-                })),
-                feePayer: tx.feePayer?.toBase58(),
-                recentBlockhash: tx.recentBlockhash
-              });
               
               // КРИТИЧЕСКАЯ ПРОВЕРКА: должны быть инструкции от Token Program
               const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -597,19 +570,7 @@
                 return programId === TOKEN_2022_PROGRAM_ID || programId === TOKEN_PROGRAM_ID;
               });
               
-              console.log(`🔍 Token Program instructions check:`, {
-                found: tokenInstructions.length,
-                expected: (revokeState.mint ? 1 : 0) + (revokeState.freeze ? 1 : 0),
-                tokenInstructions: tokenInstructions.map((ix, idx) => ({
-                  index: tx.instructions.indexOf(ix),
-                  programId: ix.programId.toBase58(),
-                  keysCount: ix.keys.length,
-                  dataLength: ix.data.length
-                }))
-              });
-              
               if (i === 0 && tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
-                console.error(`❌ CRITICAL: First transaction should contain Token Program instructions!`);
                 if (elLoadInfo) {
                   elLoadInfo.textContent = `Error: Transaction missing revoke instructions. Please contact support.`;
                   elLoadInfo.style.color = "#ff4444";
@@ -623,38 +584,18 @@
               );
 
               if (!isUpdateRevokeTransaction && tokenInstructions.length === 0 && (revokeState.mint || revokeState.freeze)) {
-                // Это должна быть транзакция с mint/freeze revoke, но Token Program инструкций нет
-                console.error(`❌ CRITICAL: No Token Program instructions found! Expected revoke instructions but transaction only has:`, 
-                  tx.instructions.map(ix => ix.programId.toBase58())
-                );
                 if (elLoadInfo) {
                   elLoadInfo.textContent = `Error: Transaction missing revoke instructions. Please contact support.`;
                   elLoadInfo.style.color = "#ff4444";
                 }
                 continue;
-              } else if (isUpdateRevokeTransaction) {
-                // Это транзакция revoke_update - использует Metaplex Program, это нормально
-                console.log(`✅ Update revoke transaction detected (Metaplex Program)`);
-                console.log(`📋 Metaplex instruction details:`, {
-                  programId: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.programId.toBase58(),
-                  keysCount: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.keys.length,
-                  dataLength: tx.instructions.find(ix => ix.programId.toBase58() === METAPLEX_PROGRAM_ID)?.data.length,
-                });
               }
-              
-              // Проверка транзакции
               
               let signedTx;
               try {
-                console.log(`✍️ Signing transaction...`);
                 signedTx = await provider.wallet.signTransaction(tx);
-                console.log(`✅ Transaction signed:`, {
-                  signatures: signedTx.signatures.map(sig => sig.publicKey.toBase58()),
-                  signatureCount: signedTx.signatures.length
-                });
               } catch (error) {
                 if (error.code === 4001 || error.message?.includes('User rejected') || error.message?.includes('User cancelled')) {
-                  console.log('❌ User rejected transaction');
                   if (elLoadInfo) {
                     elLoadInfo.textContent = 'Transaction cancelled by user';
                     elLoadInfo.style.color = "#ff9900";
@@ -668,12 +609,10 @@
               
               let binary = '';
               const signedBytes = signedTx.serialize();
-              console.log(`📦 Serialized signed transaction: ${signedBytes.length} bytes`);
               for (let j = 0; j < signedBytes.length; j++) {
                 binary += String.fromCharCode(signedBytes[j]);
               }
               const signedB64 = btoa(binary);
-              console.log(`📤 Sending transaction to ${API_BASE}/api/send-transaction`);
               
               let sendRevokeResp;
               let sendRevokeData;
@@ -690,9 +629,7 @@
                   throw new Error(`Backend returned status ${sendRevokeResp.status}: ${sendRevokeResp.statusText}`);
                 }
                 
-                console.log(`📥 Response status: ${sendRevokeResp.status} ${sendRevokeResp.statusText}`);
                 sendRevokeData = await sendRevokeResp.json();
-                console.log(`📥 Response data:`, sendRevokeData);
                 
                 if (!sendRevokeData?.success) {
                   throw new Error(sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || "Failed to send revoke transaction");
@@ -700,7 +637,6 @@
               } catch (error) {
                 if (error.message?.includes('fetch') || error.message?.includes('network') || error.message?.includes('Failed to fetch') || error.message?.includes('Backend returned status')) {
                   const errorMsg = error.message?.includes('Backend returned status') ? error.message : "Backend is not responding. Please try again later.";
-                  console.error(`❌ Backend error for revoke transaction ${i + 1}:`, errorMsg);
                   if (elLoadInfo) {
                     elLoadInfo.textContent = `Error: ${errorMsg}`;
                     elLoadInfo.style.color = "#ff4444";
@@ -709,21 +645,6 @@
                 }
                 
                 const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || error.message || "Unknown error";
-                console.error(`❌ Failed to send revoke transaction ${i + 1}:`, {
-                  status: sendRevokeResp?.status,
-                  statusText: sendRevokeResp?.statusText,
-                  error: errorMsg,
-                  fullResponse: sendRevokeData
-                });
-                
-                const revokeErrorInfo = {
-                  mint: mint,
-                  wallet: storedWallet,
-                  revokeType: i === 0 ? (revokeState.mint ? 'mint' : 'freeze') : 'freeze',
-                  error: errorMsg,
-                  timestamp: new Date().toISOString()
-                };
-                console.warn(`⚠️ Revoke failed, you can retry later. Info:`, revokeErrorInfo);
                 
                 if (elLoadInfo) {
                   elLoadInfo.innerHTML = `
@@ -740,23 +661,10 @@
                 return;
               }
               
-              console.log(`✅ Revoke transaction ${i + 1} sent successfully:`, {
-                signature: sendRevokeData.signature,
-                success: sendRevokeData.success
-              });
-              
-              if (sendRevokeData.signature) {
-                console.log(`🔍 Check transaction on explorer:`, {
-                  devnet: `https://explorer.solana.com/tx/${sendRevokeData.signature}?cluster=devnet`,
-                  solscan: `https://solscan.io/tx/${sendRevokeData.signature}?cluster=devnet`
-                });
-              }
-              
               await sleep(500);
             }
           } else {
             const message = revokeData.message || "All requested authorities are already revoked";
-            console.log("Revoke info:", message);
             if (elLoadInfo) {
               elLoadInfo.textContent = message;
               elLoadInfo.style.color = "#44ff44";
@@ -764,7 +672,6 @@
           }
         } else {
           const errorMsg = revokeData?.message || revokeData?.error || "Unknown error";
-          console.error("Revoke failed:", errorMsg);
           if (elLoadInfo) {
             elLoadInfo.textContent = `Error: ${errorMsg}`;
             elLoadInfo.style.color = "#ff4444";
@@ -775,8 +682,8 @@
       sessionStorage.removeItem("tokenCreationState");
       sessionStorage.setItem("token", mint);
 
-      if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=devnet`;
-      if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=devnet`;
+      if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=${NETWORK}`;
+      if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=${NETWORK}`;
       if (elModalAddress) elModalAddress.textContent = short(mint);
 
       if (elLoadInfo) elLoadInfo.style.display = "none";
@@ -786,7 +693,6 @@
         document.body.classList.add("active");
       }
     } catch (e) {
-      console.error(e);
       const errorMessage = String(e?.message || e);
       if (elLoadInfo) {
         elLoadInfo.style.display = "none";
@@ -846,7 +752,6 @@
       const modalTitle = document.getElementById("tokenTitleModal");
       if (modalTitle) modalTitle.textContent = "Liquidity pool transaction sent (devnet)!";
     } catch (e) {
-      console.error(e);
       const solValueInput = document.getElementById("solValue");
       const tokenAmountPool = document.getElementById("tokenAmountPool");
       if (solValueInput) solValueInput.style.border = "2px solid red";
@@ -974,7 +879,6 @@
       
       return data.ipfs_url;
     } catch (error) {
-      console.error("IPFS upload failed:", error);
       throw error;
     }
   }
@@ -1001,9 +905,7 @@
         if (label) label.textContent = file.name || "logo uploaded";
         if (sublabel) sublabel.textContent = "IPFS: " + ipfsUrl.substring(0, 30) + "...";
         
-        console.log("Image uploaded to IPFS:", ipfsUrl);
       } catch (error) {
-        console.error("Failed to upload to IPFS:", error);
         if (label) label.textContent = "Upload failed, using local";
         if (sublabel) sublabel.textContent = "Click to retry";
         window.formData.tokenLogo = URL.createObjectURL(file);

@@ -6,6 +6,16 @@
   const API_BASE = ""; // Python API (Pinata)
   const TOKEN_SERVICE_URL = "http://localhost:3001"; // Token Service (Node.js)
 
+  // Определяем сеть для explorer ссылок
+  const NETWORK = (() => {
+    if (window.location.hostname.includes('devnet') ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1') {
+      return 'devnet';
+    }
+    return 'mainnet';
+  })();
+
   // web3 глобаль приходит из <script src="...iife.min.js">
   const { Connection, PublicKey, Transaction } = window.solanaWeb3;
 
@@ -253,8 +263,8 @@
       sessionStorage.setItem("token", mint);
 
       // ссылки на devnet
-      if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=devnet`;
-      if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=devnet`;
+      if (elExplorer) elExplorer.href = `https://explorer.solana.com/address/${mint}?cluster=${NETWORK}`;
+      if (elSolscan) elSolscan.href = `https://solscan.io/token/${mint}?cluster=${NETWORK}`;
       if (elModalAddress) elModalAddress.textContent = short(mint);
 
       if (elLoadInfo) elLoadInfo.style.display = "none";
