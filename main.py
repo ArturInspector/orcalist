@@ -50,9 +50,33 @@ setup_routes(limiter)
 
 app.include_router(router)
 
+# УБРАТЬ эту строку - она перехватывает API запросы:
+# app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+
+# Вместо этого использовать SPA fallback:
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "soltoken-frontend")
 if os.path.isdir(FRONTEND_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+    # Монтировать только для /static/ пути
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    
+    # SPA fallback для всех остальных путей (только GET)
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # API роуты обрабатываются роутером выше
+        # Этот роут только для фронтенда
+        file_path = os.path.join(FRONTEND_DIR, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+
+        # SPA fallback - вернуть index.html для всех не-API путей
+        index_path = os.path.join(FRONTEND_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

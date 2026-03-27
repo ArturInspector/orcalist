@@ -1,0 +1,5 @@
+# Same host as canonical URL in index.html (sitemap must be absolute).
+User-agent: *
+Allow: /
+
+Sitemap: https://tokenx.run/sitemap.xml

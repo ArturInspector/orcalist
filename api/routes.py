@@ -2,6 +2,7 @@
 import base64
 import logging
 import os
+import httpx
 import io
 from typing import Dict, Any
 
@@ -23,9 +24,10 @@ from utils.authority import create_revoke_transactions
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
-
+TOKEN_SERVICE_URL = os.getenv("TOKEN_SERVICE_URL", "http://127.0.0.1:3001")
 
 @router.post("/api/upload-ipfs")
+@router.post("/upload-ipfs")
 async def upload_ipfs(file: UploadFile = File(...)):
     """Загружает файл на IPFS через Pinata и возвращает URI с надежным gateway."""
     try:
@@ -106,6 +108,7 @@ async def upload_ipfs(file: UploadFile = File(...)):
 
 
 @router.post("/api/upload-metadata")
+@router.post("/upload-metadata")  # временный роут для совместимости
 async def upload_metadata(request: Request):
     """
     Upload token metadata JSON to Pinata IPFS.
@@ -209,6 +212,7 @@ def health():
 
 
 @router.get("/api/config")
+@router.get("/config")  # временный роут для совместимости
 def get_config():
     return {
         "network": "devnet" if "devnet" in RPC_URL.lower() else "mainnet",
@@ -217,101 +221,6 @@ def get_config():
         "fixed_charge_sol": FIXED_CHARGE_SOL,
         "revoke_charge_sol": REVOKE_CHARGE_SOL,
     }
-
-
-@router.post("/api/send-transaction")
-async def send_transaction(request: Request):
-    MAX_TX_SIZE = 1232
-    
-    try:
-        body = await request.json()
-        signed_tx_b64 = body.get("signed_tx")
-        
-        if not signed_tx_b64:
-            raise HTTPException(status_code=400, detail="signed_tx required")
-        
-        try:
-            signed_tx_bytes = base64.b64decode(signed_tx_b64)
-        except Exception as e:
-            logger.warning(f"Failed to decode base64 transaction: {type(e).__name__}: {e}")
-            raise HTTPException(status_code=400, detail="Invalid base64 transaction")
-        
-        if len(signed_tx_bytes) > MAX_TX_SIZE:
-            client_ip_hash = hash_ip(request.client.host if request.client else None)
-            logger.warning(
-                f"Transaction too large: size={len(signed_tx_bytes)} bytes (limit={MAX_TX_SIZE}), "
-                f"client_hash={client_ip_hash}"
-            )
-            raise HTTPException(status_code=400, detail="Transaction too large")
-        
-        try:
-            tx = Transaction.deserialize(signed_tx_bytes)
-            if not tx.signatures or all(sig == bytes(64) for sig in tx.signatures):
-                logger.warning("Transaction is not signed")
-                raise HTTPException(status_code=400, detail="Transaction is not signed")
-        except Exception as e:
-            logger.warning(f"Invalid transaction format: {type(e).__name__}: {e}")
-            raise HTTPException(status_code=400, detail="Invalid transaction format")
-        
-        ALLOWED_PROGRAMS = {
-            "11111111111111111111111111111111",
-            "ComputeBudget111111111111111111111111111111",
-            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
-        }
-        
-        for ix in tx.instructions:
-            program_id_str = str(ix.program_id)
-            if program_id_str not in ALLOWED_PROGRAMS:
-                client_ip_hash = hash_ip(request.client.host if request.client else None)
-                logger.warning(
-                    f"Transaction contains disallowed program: {program_id_str}, "
-                    f"client_hash={client_ip_hash}"
-                )
-                raise HTTPException(status_code=400, detail="Transaction contains disallowed instructions")
-        
-        conn = Client(RPC_URL)
-        
-        try:
-            result = conn.send_raw_transaction(signed_tx_bytes)
-        except Exception as e:
-            logger.error(f"RPC send_raw_transaction failed: {type(e).__name__}: {e}")
-            raise HTTPException(status_code=500, detail="Internal server error")
-        
-        signature = None
-        if hasattr(result, 'value') and result.value:
-            signature = result.value
-        elif hasattr(result, 'result') and result.result:
-            signature = result.result
-        elif isinstance(result, str):
-            signature = result
-        else:
-            try:
-                if hasattr(result, 'to_json'):
-                    import json
-                    json_data = json.loads(result.to_json())
-                    signature = json_data.get('result', json_data.get('value'))
-            except Exception:
-                pass
-        
-        if not signature:
-            logger.error(f"Failed to extract signature from RPC response: {type(result)}")
-            raise HTTPException(status_code=500, detail="Internal server error")
-        
-        signature_str = str(signature)
-        logger.info(f"Transaction sent via proxy: signature={signature_str[:16]}...")
-        
-        return {
-            "success": True,
-            "signature": signature_str
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error sending transaction via proxy: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # DEPRECATED: /api/proceed removed - use Token Service directly from frontend
@@ -493,6 +402,7 @@ async def api_listing(req: ListingReq):
 
 
 @router.post("/api/revoke-all")
+@router.post("/revoke-all")
 async def revoke_all(request: Request):
     try:
         body = await request.json()
@@ -610,4 +520,45 @@ async def revoke_all(request: Request):
 
 
 def setup_routes(limiter):
-    limiter.limit("3/minute")(send_transaction)
+    pass
+
+
+# Проксирование на Token Service
+@router.post("/api/create-token-metaplex")
+async def proxy_create_token_metaplex(request: Request):
+    """Проксирует запрос на Token Service для создания токена"""
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{TOKEN_SERVICE_URL}/api/create-token-metaplex",
+                json=body
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
+        logger.error(f"Token Service proxy error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Token Service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error proxying to Token Service: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/add-metaplex-metadata")
+async def proxy_add_metaplex_metadata(request: Request):
+    """Проксирует запрос на Token Service для добавления метаданных"""
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{TOKEN_SERVICE_URL}/api/add-metaplex-metadata",
+                json=body
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
+        logger.error(f"Token Service proxy error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Token Service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error proxying to Token Service: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
