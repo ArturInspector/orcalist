@@ -2,14 +2,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   const { Connection } = window.solanaWeb3;
   const connection = new Connection("https://solana-rpc.publicnode.com", "confirmed");
 
-  const connectWalletButton   = document.getElementById("connectWalletButton"); // в шапке
-  const connectWalletBtn      = document.getElementById("connectWalletBtn");    // в форме
+  const connectWalletButton   = document.getElementById("connectWalletButton");
+  const connectWalletBtn      = document.getElementById("connectWalletBtn");
   const walletConnectSolflare = document.getElementById("walletConnectSolflare");
   const walletConnectPhantom  = document.getElementById("walletConnectPhantom");
   const walletMenu            = document.getElementById("walletMenuConnect");
   const walletMenuActions     = document.getElementById("walletMenuActions");
 
-  // --- Helpers ---
   const getPhantom = () => {
     const provider = window.phantom?.solana || window.solana;
     return provider?.isPhantom ? provider : null;
@@ -67,7 +66,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   checkStoredWallet();
 
-  // --- Connectors ---
   async function connectPhantom() {
     try {
       const provider = getPhantom();
@@ -106,7 +104,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // --- Actions ---
   function copyAddress() {
     const walletAddress = sessionStorage.getItem("walletAddress");
     if (!walletAddress) return;
@@ -133,9 +130,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const s = getSolflare();
         if (s?.isConnected) await s.disconnect();
       }
-    } catch (e) {
-      // игнорируем ошибки
-    }
+    } catch (e) {}
 
     sessionStorage.removeItem("walletAddress");
     sessionStorage.removeItem("walletProvider");
@@ -158,7 +153,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // --- Listeners ---
   document.getElementById("walletCopyAddress")?.addEventListener("click", copyAddress);
   document.getElementById("walletDisconnect")?.addEventListener("click", disconnectWallet);
   document.getElementById("walletChange")?.addEventListener("click", changeWallet);
@@ -175,7 +169,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   walletConnectPhantom?.addEventListener("click", connectPhantom);
   walletConnectSolflare?.addEventListener("click", connectSolflare);
 
-  // Подписки на события Phantom (без логирования)
   const phantom = getPhantom();
   if (phantom) {
     phantom.on?.("connect", () => {});

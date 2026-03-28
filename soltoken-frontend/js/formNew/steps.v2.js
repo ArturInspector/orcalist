@@ -1,62 +1,50 @@
-
-/// steps.js — devnet версия, без ES-модулей
 (() => {
-  // ========= CONFIG =========
-  // Определяем базовый URL API автоматически.
-  // 1) meta[name="api-base"] имеет приоритет (если не пустой)
-  // 2) если фронт работает на 3000 → шьём :8000 на тот же host
-  // 3) если фронт на стандартных портах (80/443) → используем относительный путь (nginx проксирует)
-  // 4) иначе — тот же origin (пустая строка = относительные пути)
+  try {
+    document.body.classList.remove("active");
+    document.documentElement.style.overflow = "";
+    document.getElementById("modalSuccess")?.classList.remove("active");
+    document.getElementById("modalError")?.classList.remove("active");
+  } catch (_) {}
+
+  // Step 0: API base URL
   const API_BASE = (() => {
     try {
-      // Проверяем meta tag (только для локальной разработки)
       const meta = document.querySelector('meta[name="api-base"]');
       const fromMeta = meta && meta.getAttribute('content');
       if (fromMeta && typeof fromMeta === 'string' && fromMeta.trim()) {
         return fromMeta.replace(/\/$/, '');
       }
-      
-      // Для локальной разработки
-      const port = Number(loc.port || (loc.protocol === 'https:' ? 443 : 80));
-      // Если фронтенд на порту 3000, API на порту 8000 того же хоста
+
+      const loc = window.location;
+      const port = Number(loc.port || (loc.protocol === "https:" ? 443 : 80));
       if (port === 3000) {
-        const apiUrl = `${loc.protocol}//${loc.hostname}:8000`;
-        return apiUrl;
+        return `${loc.protocol}//${loc.hostname}:8000`;
       }
-      
-      // Если фронтенд на стандартных портах (80/443), используем относительный путь
       if (port === 80 || port === 443) {
-        return ""; // Относительный путь - nginx проксирует
+        return "";
       }
-      
-      // По умолчанию относительный путь
       return "";
     } catch (_e) {
       return "";
     }
   })();
 
-  // Определяем сеть (devnet/mainnet) для explorer ссылок
   const NETWORK = (() => {
-    // Проверяем hostname - если содержит devnet или localhost, то devnet
     if (window.location.hostname.includes('devnet') ||
         window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1') {
       return 'devnet';
     }
-    // По умолчанию mainnet для продакшена
     return 'mainnet';
   })();
 
-
-  // Убрали TOKEN_SERVICE_URL - используем API_BASE для всех запросов
-  // Все запросы идут через /api/, Python API проксирует на Token Service при необходимости
-
-  // web3 глобаль приходит из <script src="...iife.min.js">
   const solanaWeb3 = window.solanaWeb3;
-  const { PublicKey, Transaction } = solanaWeb3;
+  if (!solanaWeb3?.PublicKey || !solanaWeb3?.Transaction) {
+    console.error("Solana SDK failed to load.");
+  }
+  const PublicKey = solanaWeb3?.PublicKey;
+  const Transaction = solanaWeb3?.Transaction;
 
-  // ========= HELPERS =========
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function b64ToBytes(b64) {
@@ -67,7 +55,7 @@
   }
 
   async function getProvider() {
-    const which = sessionStorage.getItem("walletProvider"); // 'phantom' | 'solflare'
+    const which = sessionStorage.getItem("walletProvider");
     if (which === "phantom" && window.solana?.isPhantom) {
       if (!window.solana.isConnected) await window.solana.connect();
       return { name: "phantom", wallet: window.solana, isPhantom: true, isSolflare: false };
@@ -89,6 +77,9 @@
   }
 
   async function signAndSendFromApiResponse(apiData, feePayer) {
+    if (!PublicKey || !Transaction) {
+      throw new Error("Solana SDK not loaded.");
+    }
     const provider = await getProvider();
 
     let base64List = [];
@@ -142,9 +133,6 @@
     return sigs;
   }
 
-  // ========= UI HOOKS =========
-
-  // элементы
   const elCreateBtn = document.getElementById("createTokenBtn");
   const elModal = document.getElementById("modalSuccess");
   const elModalError = document.getElementById("modalError");
@@ -156,26 +144,22 @@
   const elTotalCost = document.getElementById("totalCost");
 
   const revokeState = {
-    freeze: true,   // по умолчанию все выбраны
+    freeze: true,
     mint: true,
     update: true
   };
 
-  // Захардкоженные значения (не зависят от API)
   let fixedChargeSol = 0.2;
   let revokeChargeSol = 0.0999;
 
   async function loadConfig() {
-    // Загружаем только charge_to, остальное захардкожено
     try {
       const configResp = await fetch(`${API_BASE}/api/config`);
       if (configResp.ok) {
         const config = await configResp.json();
-        // fixedChargeSol и revokeChargeSol захардкожены выше
         updateCost();
       }
     } catch (error) {
-      // Config load failed - continue with defaults
     }
   }
 
@@ -250,29 +234,25 @@
     }
   }
 
-  // Проверяем при загрузке страницы
   checkIncompleteTokenCreation();
 
-  // CREATE TOKEN
   async function onCreateToken() {
     try {
       if (!elCreateBtn) return;
+      if (!solanaWeb3?.Transaction || !solanaWeb3?.Keypair) {
+        throw new Error("Solana SDK not loaded. Refresh the page.");
+      }
       elCreateBtn.disabled = true;
       if (elLoadInfo) {
         elLoadInfo.style.display = "flex";
-        elLoadInfo.style.color = ""; // Сбрасываем цвет предупреждения
+        elLoadInfo.style.color = "";
         elLoadInfo.textContent = "Preparing transaction…";
       }
       
-      // Проверяем, есть ли незавершенный процесс
       const stateStr = sessionStorage.getItem("tokenCreationState");
       if (stateStr) {
         const savedState = JSON.parse(stateStr);
         if (savedState.step === "first_tx_sent" || savedState.step === "metadata_uploaded") {
-          // Продолжаем с того места, где остановились
-          console.log("🔄 Resuming incomplete token creation from step:", savedState.step);
-          // Можно добавить логику восстановления здесь, но пока просто очищаем и начинаем заново
-          // sessionStorage.removeItem("tokenCreationState");
         }
       }
 
@@ -286,7 +266,6 @@
       const description = document.getElementById("description")?.value || "";
       const ipfsLogo = (window.formData && window.formData.tokenLogo) || "";
 
-      // Собираем соцсети
       const website = document.getElementById("website")?.value?.trim() || "";
       const twitter = document.getElementById("twitter")?.value?.trim() || "";
       const telegram = document.getElementById("telegram")?.value?.trim() || "";
@@ -306,7 +285,6 @@
       const provider = await getProvider();
 
       let chargeTo = null;
-      // Захардкоженные значения
       const fixedChargeSol = 0.2;
       const revokeChargeSol = 0.0999;
       try {
@@ -314,10 +292,8 @@
         if (configResp.ok) {
           const config = await configResp.json();
           chargeTo = config.charge_to || null;
-          // fixedChargeSol и revokeChargeSol захардкожены выше
         }
       } catch (error) {
-        // Config fetch failed - continue with defaults
       }
 
       const revokeCostReal = (revokeState.freeze ? revokeChargeSol : 0) + 
@@ -332,7 +308,8 @@
         const revokeText = revokeCostDisplay > 0 ? ` (revokes will be charged separately: ${revokeCostDisplay.toFixed(1)} SOL)` : '';
         elLoadInfo.textContent = `Step 1/2: Creating token (service fee: ${fixedChargeSol.toFixed(1)} SOL${revokeText})...`;
       }
-      
+
+      // Step 1: mint + first tx
       const createResp = await fetch(`${API_BASE}/api/create-token-metaplex`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -357,7 +334,6 @@
       const mint = createData.mint;
       const mintSecretKey = createData.mintSecretKey;
       
-      // Сохраняем состояние для восстановления при перезагрузке страницы
       sessionStorage.setItem("tokenCreationState", JSON.stringify({
         step: "token_created",
         mint: mint,
@@ -370,18 +346,13 @@
       }));
       
 
-      // Sign & send first transaction
       const revokeText = revokeCostDisplay > 0 ? ` Revokes (${revokeCostDisplay.toFixed(1)} SOL) will be charged separately.` : '';
       if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee (${fixedChargeSol.toFixed(1)} SOL total).${revokeText}`;
       
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
       
-      // IMPORTANT: User signs FIRST (Phantom requirement for single signer)
-      // Then we add mintKeypair signature after user signs
       const signedTx1 = await provider.wallet.signTransaction(tx1);
-      
-      // Now add mintKeypair signature after user signed
       const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
       signedTx1.partialSign(mintKeypair);
       
@@ -421,19 +392,17 @@
       }
 
       
-      // Обновляем состояние - первая транзакция отправлена
       const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
       currentState.step = "first_tx_sent";
       currentState.tx1Signature = send1Data.signature;
       sessionStorage.setItem("tokenCreationState", JSON.stringify(currentState));
       
-      await sleep(1000); // wait for confirmation
+      await sleep(1000);
 
-      // ========= STEP 2: Upload metadata JSON to IPFS =========
+      // Step 2: metadata JSON
       let metadataUri = "";
       if (elLoadInfo) elLoadInfo.textContent = "Uploading metadata to IPFS...";
       
-      // Всегда загружаем метаданные JSON (даже без изображения)
       const metaResp = await fetch(`${API_BASE}/api/upload-metadata`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -441,7 +410,7 @@
           name: savedTokenName,
           symbol: savedTokenSymbol,
           description: description,
-          image: savedIpfsLogo || "", // Может быть пустым
+          image: savedIpfsLogo || "",
           website: website,
           twitter: twitter,
           telegram: telegram,
@@ -452,18 +421,14 @@
       const metaData = await metaResp.json();
       if (metaResp.ok && metaData?.uri) {
         metadataUri = metaData.uri;
-        // Обновляем состояние - метаданные загружены
         const currentState = JSON.parse(sessionStorage.getItem("tokenCreationState") || "{}");
         currentState.step = "metadata_uploaded";
         currentState.metadataUri = metadataUri;
         sessionStorage.setItem("tokenCreationState", JSON.stringify(currentState));
       }
-      }
 
-      // ========= STEP 3: Add Metaplex metadata =========
+      // Step 3: on-chain metadata
       if (elLoadInfo) elLoadInfo.textContent = "Step 2/2: Adding metadata to token...";
-      
-      // Повторная валидация перед шагом 3 (на случай, если значения изменились)
       if (!savedTokenName || !savedTokenSymbol) {
         throw new Error("Token name and symbol are required for metadata");
       }
@@ -487,7 +452,6 @@
       }
 
 
-      // Sign & send second transaction
       if (elLoadInfo) elLoadInfo.textContent = "Please sign the second transaction in your wallet. This adds metadata (cost already included in 0.2 SOL service fee).";
       
       const tx2Bytes = b64ToBytes(metadataData.transaction);
@@ -562,7 +526,6 @@
               const txBytes = b64ToBytes(txB64);
               const tx = solanaWeb3.Transaction.from(txBytes);
               
-              // КРИТИЧЕСКАЯ ПРОВЕРКА: должны быть инструкции от Token Program
               const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
               const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
               const tokenInstructions = tx.instructions.filter(ix => {
@@ -710,7 +673,6 @@
     }
   }
 
-  // CREATE POOL (пока — простой SOL перевод на CHARGE_TO на бэке)
   async function onCreatePool() {
     try {
       const solValueInput = document.getElementById("solValue");
@@ -759,14 +721,12 @@
     }
   }
 
-  // Привязки
   const createBtn = document.getElementById("createTokenBtn");
   if (createBtn) createBtn.addEventListener("click", onCreateToken);
 
   const createPoolBtn = document.getElementById("createPool");
   if (createPoolBtn) createPoolBtn.addEventListener("click", onCreatePool);
 
-  // Копирование адреса в модалке
   const copyBtn = document.getElementById("modalCopyAddress");
   if (copyBtn) {
     copyBtn.addEventListener("click", function () {
@@ -786,7 +746,6 @@
     });
   }
 
-  // Закрытие модалки успеха
   const closeModal = document.getElementById("modalSuccessClose");
   if (closeModal) {
     closeModal.addEventListener("click", () => {
@@ -796,7 +755,6 @@
     });
   }
 
-  // Закрытие модалки ошибки
   const closeErrorModal = document.getElementById("modalErrorClose");
   if (closeErrorModal) {
     closeErrorModal.addEventListener("click", () => {
@@ -851,13 +809,14 @@
     }
   } catch (_) {}
 
-  if (btnChooseSupply) btnChooseSupply.addEventListener("click", () => setStep(2));
+  if (btnChooseSupply) {
+    btnChooseSupply.addEventListener("click", () => setStep(2));
+  }
   if (btnNextStepTwo) btnNextStepTwo.addEventListener("click", () => setStep(3));
   if (backToStepOne) backToStepOne.addEventListener("click", () => setStep(1));
   if (backToStepTwo) backToStepTwo.addEventListener("click", () => setStep(2));
 
 
-  // Загрузка файла на IPFS через бэкенд
   async function uploadToIPFS(file) {
     try {
       const formData = new FormData();
@@ -912,5 +871,6 @@
       }
     });
   }
+
 })();
 
