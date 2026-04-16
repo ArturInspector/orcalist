@@ -1,9 +1,14 @@
+const path = require("path");
+const root = process.env.ORCALIST_ROOT
+  ? path.resolve(process.env.ORCALIST_ROOT)
+  : path.resolve(__dirname);
+
 module.exports = {
   apps: [
     {
       name: "api",
-      cwd: "/root/orcalist",
-      script: "/root/orcalist/venv/bin/python",
+      cwd: root,
+      script: path.join(root, "venv/bin/python"),
       args: "-m uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'",
       env: {
         FIXED_CHARGE_SOL: "0.2",
@@ -15,7 +20,7 @@ module.exports = {
     },
     {
       name: "token-service",
-      cwd: "/root/orcalist/token-service",
+      cwd: path.join(root, "token-service"),
       script: "server.js",
       instances: 1,
       autorestart: true,
@@ -33,7 +38,7 @@ module.exports = {
       name: "front",
       script: "npx",
       args: ["serve", "-s", "soltoken-frontend", "-l", "3000"],
-      cwd: "/root/orcalist",
+      cwd: root,
       exec_mode: "fork",
       env: {
         NODE_ENV: "production"

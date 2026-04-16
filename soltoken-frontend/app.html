@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="canonical" href="https://tokenx.run/app">
+  <meta name="description" content="Create and list Solana SPL tokens with metadata on IPFS. Connect your wallet, mint Token-2022 compatible assets, and prepare listings for Raydium-style workflows.">
+  <meta name="robots" content="index, follow">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:site_name" content="TokenStart">
+  <meta property="og:title" content="TokenStart — Solana token creation & listing">
+  <meta property="og:description" content="Create and list Solana SPL tokens with metadata on IPFS. Wallet-based flow for Token-2022 and classic SPL.">
+  <meta property="og:url" content="https://tokenx.run/app">
+  <meta property="og:image" content="https://tokenx.run/favicon.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="TokenStart — Solana token creation & listing">
+  <meta name="twitter:description" content="Create and list Solana SPL tokens with metadata on IPFS.">
+  <meta name="twitter:image" content="https://tokenx.run/favicon.png">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebSite","name":"TokenStart","url":"https://tokenx.run/","description":"Solana SPL token creation and listing with IPFS metadata.","inLanguage":"en-US"}
+  </script>
+  <link rel="stylesheet" type="text/css" href="css/normalize.css" media="screen">
+  <link rel="stylesheet" href="fonts/stylesheet.css">
+  <link rel="stylesheet" href="css/index.css">
+  <link rel="icon" href="favicon.png" type="image/png">
+  <!-- optional: <meta name="api-base" content="http://127.0.0.1:8000"> -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous"> 
+  <script src="https://cdn.jsdelivr.net/npm/ipfs-http-client/dist/index.min.js"></script>
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+
+  <title>TokenStart — Solana token creation &amp; listing</title>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+</head>
+<body>
+<div class="wrapper">
+  <header id="header">
+    <div class="container">
+      <div class="header_mains">
+        <div class="header_logo">
+          <a href="#"><img src="img/logo.svg" width="120" height="32" alt="TokenStart — Solana token tools"></a>
+        </div>
+        <div class="header_main">
+          <a href="#">Create Token</a>
+          <a href="#">Create Liquidity</a>
+          <a href="#">Boost Token</a>
+          <a href="#" target="_blank">Manage Liquidity</a>
+        </div>
+        <div class="header__right">
+          <button class="btn-xe" id="connectWalletButton" type="button" style="">
+            Connect wallet
+          </button>
+        </div>
+        <div class="wallet__menu" id="walletMenuConnect">
+          <button class="wallet__btn" type="button" id="walletConnectSolflare">
+            <img src="img/solfare.png" width="22" height="22" alt="Solfare icon">
+            <div class="wallet__info">
+              <span class="wallet__name">Solflare</span>
+              <p class="wallet__text">Connect your solflare wallet</p>
+            </div>
+          </button>
+          <button class="wallet__btn" type="button" id="walletConnectPhantom">
+            <img src="img/phantom.svg" width="24" height="20" alt="Phantom icon">
+            <div class="wallet__info">
+              <span class="wallet__name">Phantom</span>
+              <p class="wallet__text">Connect your Phantom wallet</p>
+            </div>
+          </button>
+        </div>
+        <div class="wallet__menu" id="walletMenuActions">
+          <button class="wallet__btn" type="button" id="walletCopyAddress">
+            <img src="img/copy-address.svg" width="21" height="27" alt="Copy icon">
+            <div class="wallet__info">
+              <span class="wallet__name">Copy address</span>
+              <p class="wallet__text">Copy your Solana address</p>
+            </div>
+          </button>
+          <button class="wallet__btn" type="button" id="walletDisconnect">
+            <img src="img/disconnect.svg" width="24" height="24" alt="Disconnect icon">
+            <div class="wallet__info">
+              <span class="wallet__name">Disconnect</span>
+              <p class="wallet__text">Disconnect your Solana wallet</p>
+            </div>
+          </button>
+          <button class="wallet__btn" type="button" id="walletChange">
+            <img src="img/change.svg" width="20" height="20" alt="Disconnect icon">
+            <div class="wallet__info">
+              <span class="wallet__name">Change wallet</span>
+              <p class="wallet__text">Change your Solana wallet</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="make" id="make">
+    <div class="container">
+      <div id="yellowBlock" class="make_title">
+        <h1>Make it simple,<br> launch your token</h1>
+        <p>Create and launch your Solana token in just <br> a few clicks—no coding required.</p>
+      </div>
+      <form action="">
+        <div class="make__connect">
+          <p class="make__text">Connect a wallet on Solana to continue</p>
+          <button class="btn-xe" id="connectWalletBtn" type="button">Connect wallet</button>
+        </div>
+        <div class="make__item" style="display: none">
+          <div id="stepOne" style="display: none">
+            <span class="error" id="errorFieldsStepOne">Please fill in all fields in active Step</span>
+            <div class="make__fields">
+              <div class="make__field">
+                <label class="label" for="tokenName">Token name</label>
+                <input class="input" type="text" id="tokenName" placeholder="Moon Coin">
+              </div>
+              <div class="make__field">
+                <label class="label" for="tokenSymbol">Token Symbol</label>
+                <input class="input" type="text" id="tokenSymbol" placeholder="MNCN">
+              </div>
+            </div>
+            <button class="make__select" type="button">
+              <img src="img/upload.svg" width="38" height="40" alt="upload icon">
+              <span class="make__select-text">Select your Token’s logo here</span>
+              <span class="make__select-subtext">PNG, JPG, GIF up to 5MB</span>
+            </button>
+            <input type="file" id="tokenLogo" accept="image/png,image/jpeg,image/gif" style="display: none;">
+          </div>
+
+          <div id="stepTwo" style="display: none">
+            <span class="error" id="errorFieldsStepTwo">Please fill in all fields in active Step</span>
+            <div class="make__fields">
+              <div class="make__field">
+                <label class="label" for="decimals">Decimals</label>
+                <input class="input" type="number" id="decimals" value="9" placeholder="Enter Decimals">
+              </div>
+              <div class="make__field">
+                <label class="label" for="supply">Total Supply</label>
+                <input class="input" type="number" id="supply" value="1000000000" placeholder="Enter Supply">
+              </div>
+            </div>
+            <div class="make__fields--long">
+              <div class="make__field">
+                <label class="label" for="description">Description</label>
+                <textarea class="input input--textarea" id="description" placeholder="Describe your token"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div id="stepThree" style="display: none">
+            <div class="make__fields--bottom">
+              <div class="make__field">
+                <label class="label" for="website">Website</label>
+                <input class="input" type="text" id="website" placeholder="https://yourtoken.fun">
+              </div>
+              <div class="make__field">
+                <label class="label" for="twitter">Twitter</label>
+                <input class="input" type="text" id="twitter" placeholder="https://x.com/yourtoken">
+              </div>
+              <div class="make__field">
+                <label class="label" for="telegram">Telegram</label>
+                <input class="input" type="text" id="telegram" placeholder="https://t.me/yourtoken">
+              </div>
+              <div class="make__field">
+                <label class="label" for="discord">Discord</label>
+                <input class="input" type="text" id="discord" placeholder="https://discord.gg/your-token">
+              </div>
+            </div>
+
+            <div class="make__modify">
+            </div>
+            <div class="make__revoke">
+              <h3 class="make__subtitle">Modify Creator Information</h3>
+              <p class="make__description">
+                Increase trust by revoking authorities. Each option adds 0.1 SOL to the total cost.
+              </p>
+              <div class="selectors">
+                <div class="selector" data-select="freeze">
+                  <div class="selector__head">
+                    <img src="img/icons/1.svg" width="48" height="48" alt="decor icon">
+                    <span class="selector__cost">+0.1 SOL</span>
+                  </div>
+                  <span class="selector__name">Revoke Freeze</span>
+                  <p class="selector__text">
+                    Freeze Authority allows you to freeze token accounts of holders.
+                  </p>
+                  <button class="selector__btn btn-xe" data-btn="freeze" type="button">Select to Revoke</button>
+                </div>
+                <div class="selector" data-select="mint">
+                  <div class="selector__head">
+                    <img src="img/icons/2.svg" width="48" height="48" alt="decor icon">
+                    <span class="selector__cost">+0.1 SOL</span>
+                  </div>
+                  <span class="selector__name">Revoke Mint</span>
+                  <p class="selector__text">
+                    Mint Authority allows you to mint more supply of your token.
+                  </p>
+                  <button class="selector__btn btn-xe" data-btn="mint" type="button">Select to Revoke</button>
+                </div>
+                <div class="selector" data-select="update">
+                  <div class="selector__head">
+                    <img src="img/icons/3.svg" width="48" height="48" alt="decor icon">
+                    <span class="selector__cost">+0.1 SOL</span>
+                  </div>
+                  <span class="selector__name">Revoke Update</span>
+                  <p class="selector__text">
+                    Update Authority allows you to update the token metadata about your token.
+                  </p>
+                  <button class="selector__btn btn-xe" data-btn="update" type="button">Select to Revoke</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="load__info" style="display: none">
+            <svg class="load__icon" version="1.1" id="loader-1" xmlns="http://www.w3.org/2000/svg"
+                 xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="40px" height="40px"
+                 viewBox="0 0 50 50" style="enable-background:new 0 0 50 50;" xml:space="preserve">
+              <path fill="#C9FF2A"
+                    d="M25.251,6.461c-10.318,0-18.683,8.365-18.683,18.683h4.068c0-8.071,6.543-14.615,14.615-14.615V6.461z">
+              <animateTransform attributeType="xml" attributeName="transform" type="rotate" from="0 25 25"
+                                to="360 25 25" dur="0.6s" repeatCount="indefinite"></animateTransform>
+              </path>
+            </svg>
+            Setting up Token Account...
+          </div>
+          <div class="make__bottom">
+            <ul class="make__steps">
+              <li class="make__step make__step--active" id="stepNumOne">1</li>
+              <li class="make__step" id="stepNumTwo">2</li>
+              <li class="make__step" id="stepNumThree">3</li>
+            </ul>
+            <button class="btn-xe" type="button" id="manipulationBtn">Choose Supply</button>
+            <button class="btn-xe" type="button" id="nextStepTwoBtn" style="display: none">Next</button>
+            <div class="make__bottom-right" id="stepThreeData" style="display:none;">
+              <p class="make__cost" id="totalCost" style="display:none;">Cost: 0.2 SOL</p>
+              <button class="btn-xe" id="createTokenBtn" type="button">Create Token</button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-xe" id="modalSuccess">
+    <button class="modal-xe__close" id="modalSuccessClose">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M10.0003 8.70383L14.5374 4.16675L15.8337 5.46305L11.2966 10.0001L15.8337 14.5371L14.5374 15.8334L10.0003 11.2964L5.46329 15.8334L4.16699 14.5371L8.70403 10.0001L4.16699 5.46305L5.46329 4.16675L10.0003 8.70383Z" fill="#fff"></path>
+      </svg>
+    </button>
+    <div class="modal-xe__head">
+      <img src="img/icons/success.svg" width="36" height="36" alt="success icon">
+      <h3 class="modal-xe__title" id="tokenTitleModal">Token Created Successfully!</h3>
+    </div>
+    <span class="modal-xe__subtext">Token Address</span>
+    <div class="modal-xe__value">
+      <div class="modal-xe__address">
+        <p id="modalAddressWallet"></p>
+      </div>
+      <button class="modal-xe__btn" id="modalCopyAddress" type="button">
+        <img src="img/copy-address.svg" alt="icon copy">
+      </button>
+    </div>
+    <div class="modal-xe__links">
+      <a class="modal-xe__link" href="" id='explorerLink' target="_blank">
+        <img src="img/link.svg" alt="link icon">
+        View on Explorer
+      </a>
+      <a class="modal-xe__link" href="" id='solcanLink' target="_blank">
+        <img src="img/link.svg" alt="link icon">
+        View on Solscan
+      </a>
+      <a class="modal-xe__link" id="createLiquidityPool" href="https://raydium.io/liquidity/create-pool/" target="_blank">
+        <img src="img/link.svg" alt="link icon">
+        Create Liquidity Pool
+      </a>
+      <input class="input" id="solValue" placeholder="Amount sol value" style="display: none; height: 52px;">
+      <input class="input" id="tokenAmountPool" placeholder="Counts tokens for pool" style="display: none; height: 52px;">
+      <button class="btn-xe" id="createPool" type="button" style="display: none; height: 52px;">Create Pool</button>
+    </div>
+    <p class="modal-xe__info">
+      Use the token address above to add it to your wallet
+    </p>
+  </div>
+  <div class="modal-xe" id="modalError">
+    <button class="modal-xe__close" id="modalErrorClose">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M10.0003 8.70383L14.5374 4.16675L15.8337 5.46305L11.2966 10.0001L15.8337 14.5371L14.5374 15.8334L10.0003 11.2964L5.46329 15.8334L4.16699 14.5371L8.70403 10.0001L4.16699 5.46305L5.46329 4.16675L10.0003 8.70383Z" fill="#fff"></path>
+      </svg>
+    </button>
+    <div class="modal-xe__head">
+      <img src="img/icons/error.svg" width="36" height="36" alt="success icon">
+      <h3 class="modal-xe__title">Error Creating Token</h3>
+    </div>
+    <p class="modal-xe__error" id="modalErrorText">
+      An error occurred while creating the token.
+    </p>
+    <p class="modal-xe__info">
+      Retry, or reach out to support for further assistance.
+    </p>
+  </div>
+  <div class="token">
+    <div class="container">
+      <div class="token_title">
+        <h1>How to use TokenStart</h1>
+        <p>How to Create a Token in Solana with TokenStart</p>
+      </div>
+      <div class="token_mains">
+        <div class="token_left">
+          <div class="steps">
+            <div class="step" style="margin-bottom: 89px;"><img src="img/token_elips.svg" alt="">Connect your Solana
+              wallet
+            </div>
+            <div class="step" style="margin-bottom: 130px;"><img src="img/token_elips.svg" alt=""><span
+                class="highlight">Registration of your token</span></div>
+            <div class="step" style="margin-bottom: 60px;"><img src="img/token_elips.svg" alt="">Choose the number of
+              decimal
+            </div>
+            <div class="step" style="margin-bottom: 60px;"><img src="img/token_elips.svg" alt="">Set the total token
+              supply
+            </div>
+            <div class="step"><img src="img/token_elips.svg" alt="">Click "Create"</div>
+          </div>
+        </div>
+        <div class="token_right">
+          <div class="sup" style="margin-bottom: 59px;">
+            <img src="img/t1.svg" alt="">
+            <p>Supports Solflare and Phantom Wallet</p>
+          </div>
+          <div class="supp" style="margin-bottom: 8px;">
+            <div class="sup">
+              <img src="img/t2.svg" alt="">
+              <p>Enter the name</p>
+            </div>
+            <div class="sup">
+              <img src="img/t3.svg" alt="">
+              <p>Set the symbol</p>
+            </div>
+          </div>
+          <div class="supp" style="margin-bottom: 69px;">
+            <div class="sup">
+              <img src="img/t4.svg" alt="">
+              <p>Add a description</p>
+            </div>
+            <div class="sup">
+              <img src="img/t5.svg" alt="">
+              <p>Upload an image</p>
+            </div>
+          </div>
+          <div class="sup" style="margin-bottom: 39px;">
+            <img src="img/t6.svg" alt="">
+            <p>Enter a value between 0 and 18 decimals</p>
+          </div>
+          <div class="sup" style="margin-bottom: 39px;">
+            <img src="img/t7.svg" alt="">
+            <p>Define the total number of tokens</p>
+          </div>
+          <div class="supp">
+            <div class="sup">
+              <img src="img/t8.svg" alt="">
+              <p>Confirm the transaction</p>
+            </div>
+            <div class="sup">
+              <img src="img/t9.svg" alt="">
+              <p>Wait for the process to finish</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="any">
+    <div class="container">
+      <div class="any_title">
+        <h1>
+          Any other questions?
+        </h1>
+        <p>There are the most commoinly asked questions about TokenStart <br> Can’t find what you’re looking for?
+          Contact us!</p>
+      </div>
+      <div class="any_mains">
+        <div class="accordion" id="accordionExample">
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne"
+                      aria-expanded="true" aria-controls="collapseOne">
+                Why choose Solana for launching a token?
+              </button>
+            </h2>
+            <div id="collapseOne" class="accordion-collapse collapse show" data-bs-parent="#accordionExample">
+              <div class="accordion-body">
+                <p>Solana is a high-performance blockchain offering fast transactions, low fees, and excellent
+                  scalability. Its rapidly growing ecosystem, active developer community, and increasing adoption make
+                  it an ideal platform for token launches.</p>
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#collapseTwo" aria-expanded="false" aria-controls="collapseTwo">
+                What is the process for creating a token on Solana?
+              </button>
+            </h2>
+            <div id="collapseTwo" class="accordion-collapse collapse" data-bs-parent="#accordionExample">
+              <div class="accordion-body">
+                <p>Creating a token on Solana is simple with our platform. Just connect your wallet, enter your token
+                  details (name, symbol, supply, etc.), adjust settings if necessary, and submit. Our tool takes care of
+                  the technical complexities, making the process seamless.</p>
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#collapseThree" aria-expanded="false" aria-controls="collapseThree">
+                How do I deploy my own token on Solana?
+              </button>
+            </h2>
+            <div id="collapseThree" class="accordion-collapse collapse" data-bs-parent="#accordionExample">
+              <div class="accordion-body">
+                <p>To deploy a token on Solana, follow these steps: <br>
+                  1. Connect your Solana wallet. <br>
+                  2. Enter token details (name, symbol, supply, decimals). <br>
+                  3. Upload a token image and metadata.<br>
+                  4. Configure optional settings like freeze authority.<br>
+                  5. Confirm the transaction.<br>
+                  Our platform streamlines the process, guiding you every step of the way.</p>
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#collapseTwo1" aria-expanded="false" aria-controls="collapseTwo1">
+                How do I manage token authorities on Solana?
+              </button>
+            </h2>
+            <div id="collapseTwo1" class="accordion-collapse collapse" data-bs-parent="#accordionExample">
+              <div class="accordion-body">
+                <p>Our platform allows you to manage token authorities easily. During token creation, you can assign and
+                  revoke authorities such as freeze, mint, and update authority. These controls define who can perform
+                  specific actions with your token after deployment.</p>
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#collapseThree1" aria-expanded="false" aria-controls="collapseThree1">
+                Which platforms can help with launching a token on Solana?
+              </button>
+            </h2>
+            <div id="collapseThree1" class="accordion-collapse collapse" data-bs-parent="#accordionExample">
+              <div class="accordion-body">
+                <p>Several platforms can assist with token creation on Solana. TokenStart (our platform) offers a
+                  user-friendly interface for easy token deployment. Other options include Solana's CLI tools and
+                  various development frameworks, but our platform provides the simplest solution for non-technical
+                  users.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="container">
+      <div class="footer_mains">
+        <div class="footer_logo">
+          <div class="footer_logo_one">
+            <a href="#"><img src="img/footer_logo.svg" alt=""></a>
+          </div>
+          <div class="footer_logo_too">
+            <a href="#"><img src="img/tg.svg" alt=""></a>
+            <a href="#"><img src="img/dic.svg" alt=""></a>
+            <a href="#"><img src="img/x.svg" alt=""></a>
+          </div>
+        </div>
+        <div class="footer_main">
+          <a href="/app">Create Token</a>
+          <a href="/terms">Terms of Service</a>
+          <a href="/privacy">Privacy Policy</a>
+        </div>
+        <div class="footer_end">
+          <a href="#header">
+            Back to top ∧
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+<div class="footer_second">
+  <div class="container">
+    <p>
+      TokenStart is a token creation platform. We do not provide financial advice or guarantee any results. You are
+      responsible for complying with all applicable laws and regulations. Creating and trading tokens involves
+      significant risks—please conduct your own research before using the platform. The platform is provided “as is”
+      without any warranties. By using TokenStart, you acknowledge and accept all associated risks.
+    </p>
+      <span>© 2026 TokenStart | All Rights Reserved</span>
+  </div>
+</div>
+</div>
+
+<!-- load order: web3, then steps.v2.js -->
+<script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+<script src="js/formNew/steps.v2.js?v=2026-03-27-comments"></script>
+<script type="module" src="/js/formNew/header.js"></script>	
+</body>
+</html>

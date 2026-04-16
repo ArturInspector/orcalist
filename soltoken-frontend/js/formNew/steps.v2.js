@@ -332,39 +332,37 @@
       }
 
       const mint = createData.mint;
-      const mintSecretKey = createData.mintSecretKey;
-      
+      const sessionId = createData.session_id;
+
       sessionStorage.setItem("tokenCreationState", JSON.stringify({
         step: "token_created",
         mint: mint,
-        mintSecretKey: mintSecretKey,
+        session_id: sessionId,
         tokenName: savedTokenName,
         tokenSymbol: savedTokenSymbol,
         ipfsLogo: savedIpfsLogo,
         description: description,
         decimals: decimals,
       }));
-      
 
       const revokeText = revokeCostDisplay > 0 ? ` Revokes (${revokeCostDisplay.toFixed(1)} SOL) will be charged separately.` : '';
       if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee (${fixedChargeSol.toFixed(1)} SOL total).${revokeText}`;
-      
+
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
-      
+
+      // User signs only with their wallet — mint keypair is co-signed server-side via session_id
       const signedTx1 = await provider.wallet.signTransaction(tx1);
-      const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
-      signedTx1.partialSign(mintKeypair);
-      
+
       if (elLoadInfo) elLoadInfo.textContent = "Sending first transaction...";
-      
+
       let binary1 = '';
-      const signedTx1Bytes = signedTx1.serialize();
+      const signedTx1Bytes = signedTx1.serialize({ requireAllSignatures: false });
       for (let i = 0; i < signedTx1Bytes.length; i++) {
         binary1 += String.fromCharCode(signedTx1Bytes[i]);
       }
       const signedTx1Base64 = btoa(binary1);
-      
+
       let send1Resp;
       let send1Data;
       try {
@@ -373,6 +371,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             signed_transaction: signedTx1Base64,
+            session_id: sessionId,
           }),
         });
         
@@ -438,7 +437,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mint: mint,
-          mint_secret_key: mintSecretKey,
+          session_id: sessionId,
           payer: storedWallet,
           name: savedTokenName,
           symbol: savedTokenSymbol,
