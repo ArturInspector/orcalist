@@ -201,8 +201,9 @@ async def upload_metadata(request: Request):
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 def health():
+    # HEAD — для curl -I / мониторинга; иначе только GET matчится и запрос уходит в SPA → 404
     return {
         "status": "ok",
         "rpc": safe_rpc_url(RPC_URL),

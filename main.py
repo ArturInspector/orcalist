@@ -50,6 +50,8 @@ if cors_origins_env:
 else:
     # Дефолтные origins
     allow_origins = [
+        "https://tokenx.run",
+        "https://www.tokenx.run",
         "https://tokenstart.pro",
         "https://www.tokenstart.pro",
         "http://localhost:3000",

@@ -35,7 +35,7 @@
 - `config.py` - читает `NETWORK` из env, по умолчанию `devnet`
 
 **На проде:**
-- `ecosystem.config.prod.js` - NETWORK не задан (по умолчанию `devnet`)
+- `ecosystem.prod.config.js` - NETWORK не задан (по умолчанию `devnet`)
 - Нужно явно задать `NETWORK=devnet` для тестирования, затем `NETWORK=mainnet`
 
 **Где используется:**
@@ -50,7 +50,7 @@
 
 **На проде:**
 - Задается через `CORS_ORIGINS` env переменную
-- В `ecosystem.config.prod.js` уже задано: `https://tokenstart.pro,https://www.tokenstart.pro,...`
+- В `ecosystem.prod.config.js` уже задано: `https://tokenstart.pro,https://www.tokenstart.pro,...`
 
 **Код:** `main.py:24-37`
 
@@ -107,13 +107,13 @@
 1. **Подготовить конфигурацию**
    ```bash
    # На сервере создать .env файл с NETWORK=devnet
-   # Обновить ecosystem.config.prod.js с NETWORK=devnet
+   # Обновить ecosystem.prod.config.js с NETWORK=devnet
    ```
 
 2. **Деплой через git**
    ```bash
    git pull origin main
-   pm2 restart ecosystem.config.prod.js
+   pm2 restart ecosystem.prod.config.js
    ```
 
 3. **Проверить nginx**
@@ -131,7 +131,7 @@
 
 1. **Обновить конфигурацию**
    ```bash
-   # В ecosystem.config.prod.js изменить:
+   # В ecosystem.prod.config.js изменить:
    env: {
      NETWORK: "mainnet",
      ...
@@ -145,7 +145,7 @@
 
 3. **Перезапустить сервисы**
    ```bash
-   pm2 restart ecosystem.config.prod.js
+   pm2 restart ecosystem.prod.config.js
    ```
 
 4. **Проверить работу**
@@ -186,7 +186,7 @@ pm2 start ecosystem.config.js
 pm2 logs
 
 # На проде
-pm2 start ecosystem.config.prod.js
+pm2 start ecosystem.prod.config.js
 pm2 logs
 
 # Проверка статуса
@@ -194,7 +194,7 @@ pm2 status
 pm2 monit
 
 # Перезапуск
-pm2 restart ecosystem.config.prod.js
+pm2 restart ecosystem.prod.config.js
 
 # Проверка nginx
 sudo nginx -t
@@ -208,7 +208,7 @@ sudo systemctl reload nginx
 git reset --hard <commit-hash>
 
 # Перезапустить сервисы
-pm2 restart ecosystem.config.prod.js
+pm2 restart ecosystem.prod.config.js
 
 # Проверить логи
 pm2 logs --lines 100

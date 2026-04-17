@@ -16,13 +16,9 @@ module.exports = {
         TOKEN_SERVICE_URL: "http://localhost:3001",
         CORS_ORIGINS:
           "https://tokenstart.pro,https://www.tokenstart.pro,https://tokenx.run,https://www.tokenx.run,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
-        PINATA_JWT_TOKEN: process.env.PINATA_JWT_TOKEN || "",
-        PINATA_API_KEY: process.env.PINATA_API_KEY || "",
-        PINATA_SECRET_KEY: process.env.PINATA_SECRET_KEY || "",
-        HELIUS_API_KEY: process.env.HELIUS_API_KEY || "",
-        NETWORK: "mainnet",
-        RPC_URL: process.env.RPC_URL || "",
-        CHARGE_TO: process.env.CHARGE_TO || "HD7dHSFCuvDQqSUuCULA6ssrwceTVVYQwb9wc3iZG5rG"
+        // Секреты только из .env в cwd (root). Не передавать PINATA/HELIUS пустыми строками —
+        // иначе load_dotenv() в Python их не перезапишет и бэк живёт без ключей.
+        NETWORK: "mainnet"
       },
       max_restarts: 10,
       restart_delay: 2000
@@ -38,7 +34,8 @@ module.exports = {
       env: {
         TOKEN_SERVICE_PORT: "3001",
         NODE_ENV: "production",
-        REVOKE_CHARGE_SOL: "0.0999"
+        REVOKE_CHARGE_SOL: "0.0999",
+        NETWORK: "mainnet"
       },
       max_restarts: 10,
       restart_delay: 2000

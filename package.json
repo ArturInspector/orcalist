@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test:frontend": "node --test tests/frontend/*.spec.mjs"
+  },
   "devDependencies": {
     "@solana/spl-token": "^0.4.14",
     "@solana/spl-token-metadata": "^0.1.6",

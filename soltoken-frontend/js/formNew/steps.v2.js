@@ -220,7 +220,7 @@
       if (!stateStr) return false;
       
       const state = JSON.parse(stateStr);
-      if (!state.mint || !state.mintSecretKey) return false;
+      if (!state.mint || !state.session_id) return false;
       
         if (elLoadInfo) {
           elLoadInfo.style.display = "flex";
@@ -609,16 +609,7 @@
                 const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || error.message || "Unknown error";
                 
                 if (elLoadInfo) {
-                  elLoadInfo.innerHTML = `
-                    <div style="color: #ff4444;">
-                      <strong>Error sending revoke transaction ${i + 1}:</strong><br>
-                      ${errorMsg}<br><br>
-                      <small style="color: #888;">
-                        ⚠️ Your token was created successfully, but revoke failed.<br>
-                        You can retry revoke later using the same mint address: <code>${mint}</code>
-                      </small>
-                    </div>
-                  `;
+                  elLoadInfo.textContent = `Error sending revoke transaction ${i + 1}: ${errorMsg}. Your token was created successfully, but revoke failed. Mint: ${short(mint)}`;
                 }
                 return;
               }

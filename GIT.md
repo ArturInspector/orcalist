@@ -4,7 +4,7 @@
 
 Сейчас у нас один репозиторий с разными конфигурациями для локальной разработки и прода:
 - `ecosystem.config.js` - локальная разработка
-- `ecosystem.config.prod.js` - продакшн
+- `ecosystem.prod.config.js` - продакшн (имя должно содержать `.config.js` — иначе PM2 не парсит apps)
 - Разные пути к файлам (`/home/lyudskoe/` vs `/root/tokenstart/`)
 - Разные настройки API_BASE (локально через порты, на проде через nginx)
 - Хардкод devnet в коде фронтенда
@@ -194,7 +194,7 @@ hotfix/*                # Срочные исправления
 
 ### Шаг 2: Рефакторинг ecosystem.config.js
 
-1. Объединить `ecosystem.config.js` и `ecosystem.config.prod.js` в один файл
+1. Объединить `ecosystem.config.js` и `ecosystem.prod.config.js` в один файл
 2. Использовать переменные окружения для путей
 3. Убрать все хардкоды
 
