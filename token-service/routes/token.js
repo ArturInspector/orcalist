@@ -1,7 +1,5 @@
-const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
-const { Keypair, Transaction } = require('@solana/web3.js');
 const { 
   createTokenTransaction, 
   sendSignedTransaction 
@@ -10,34 +8,6 @@ const { createSimpleToken } = require('../utils/transaction-simple');
 const { createBaseToken2022 } = require('../utils/transaction-base');
 const { addMetaplexMetadata, revokeUpdateAuthority } = require('../utils/metaplex-metadata');
 const { createRevokeTransactions } = require('../utils/revoke-authority');
-
-// Server-side session store for mint keypairs — never exposed to the browser
-const mintSessions = new Map();
-const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
-
-function storeMintSession(mintSecretKey) {
-  const sessionId = crypto.randomUUID();
-  mintSessions.set(sessionId, { mintSecretKey, createdAt: Date.now() });
-  return sessionId;
-}
-
-function getMintSession(sessionId) {
-  const session = mintSessions.get(sessionId);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
-    mintSessions.delete(sessionId);
-    return null;
-  }
-  return session;
-}
-
-// Cleanup expired sessions every 10 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, session] of mintSessions.entries()) {
-    if (now - session.createdAt > SESSION_TTL_MS) mintSessions.delete(id);
-  }
-}, 10 * 60 * 1000);
 
 const HELIUS_API_KEY = (process.env.HELIUS_API_KEY || '').trim();
 const NETWORK = (process.env.NETWORK || 'devnet').trim().toLowerCase();
@@ -156,37 +126,38 @@ router.post('/create-token', async (req, res) => {
 });
 
 // POST /api/send-transaction
-// Receives user-signed transaction; if session_id provided, partialSigns with stored mint keypair first
+// Receives signed transaction and sends to Solana RPC
 router.post('/send-transaction', async (req, res) => {
   try {
-    const { signed_transaction, session_id } = req.body;
+    const {
+      signed_transaction,
+    } = req.body;
 
     if (!signed_transaction) {
-      return res.status(400).json({ success: false, error: 'signed_transaction is required' });
-    }
-
-    let transactionToSend = signed_transaction;
-
-    if (session_id) {
-      const session = getMintSession(session_id);
-      if (!session) {
-        return res.status(400).json({ success: false, error: 'Session expired or invalid. Please restart token creation.' });
-      }
-      const txBuffer = Buffer.from(signed_transaction, 'base64');
-      const tx = Transaction.from(txBuffer);
-      const mintKeypair = Keypair.fromSecretKey(new Uint8Array(session.mintSecretKey));
-      tx.partialSign(mintKeypair);
-      transactionToSend = tx.serialize({ requireAllSignatures: false }).toString('base64');
-      console.log('[send-transaction] partialSigned with stored mint keypair for session:', session_id);
+      return res.status(400).json({
+        success: false,
+        error: 'signed_transaction is required'
+      });
     }
 
     console.log('Sending signed transaction to RPC...');
-    const result = await sendSignedTransaction({ signedTransaction: transactionToSend, rpcUrl: RPC_URL });
-    res.json({ success: true, ...result });
+
+    const result = await sendSignedTransaction({
+      signedTransaction: signed_transaction,
+      rpcUrl: RPC_URL
+    });
+
+    res.json({
+      success: true,
+      ...result
+    });
 
   } catch (error) {
     console.error('Error sending transaction:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
@@ -228,12 +199,9 @@ router.post('/create-token-metaplex', async (req, res) => {
       uri: image_uri || '',
     });
 
-    const sessionId = storeMintSession(result.mintSecretKey);
     res.json({
       success: true,
-      transaction: result.transaction,
-      mint: result.mint,
-      session_id: sessionId,
+      ...result,
       next_step: 'add_metadata',
       metadata: { name, symbol, uri: image_uri }
     });
@@ -247,27 +215,24 @@ router.post('/create-token-metaplex', async (req, res) => {
   }
 });
 
-// POST /api/add-metaplex-metadata (Step 2)
-// Adds Metaplex Token Metadata. Accepts session_id (preferred) or legacy mint_secret_key.
+// POST /api/add-metaplex-metadata (NEW - Step 2)
+// Adds Metaplex Token Metadata to existing mint
 router.post('/add-metaplex-metadata', async (req, res) => {
   try {
-    const { mint, session_id, mint_secret_key, payer, name, symbol, uri } = req.body;
+    const {
+      mint,
+      mint_secret_key,
+      payer,
+      name,
+      symbol,
+      uri,
+    } = req.body;
 
-    let resolvedSecretKey;
-    if (session_id) {
-      const session = getMintSession(session_id);
-      if (!session) {
-        return res.status(400).json({ success: false, error: 'Session expired or invalid. Please restart token creation.' });
-      }
-      resolvedSecretKey = session.mintSecretKey;
-    } else if (mint_secret_key) {
-      resolvedSecretKey = mint_secret_key;
-    } else {
-      return res.status(400).json({ success: false, error: 'session_id or mint_secret_key is required' });
-    }
-
-    if (!mint || !payer || !name || !symbol) {
-      return res.status(400).json({ success: false, error: 'Mint, payer, name, and symbol are required' });
+    if (!mint || !mint_secret_key || !payer || !name || !symbol) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Mint, mint_secret_key, payer, name, and symbol are required' 
+      });
     }
 
     console.log('=== STEP 2: Adding Metaplex metadata ===');
@@ -280,7 +245,7 @@ router.post('/add-metaplex-metadata', async (req, res) => {
 
     const result = await addMetaplexMetadata({
       mintAddress: mint,
-      mintSecretKey: resolvedSecretKey,
+      mintSecretKey: mint_secret_key,
       payerAddress: payer,
       name: sanitizeString(name),
       symbol: sanitizeString(symbol),

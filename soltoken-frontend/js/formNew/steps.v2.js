@@ -220,7 +220,7 @@
       if (!stateStr) return false;
       
       const state = JSON.parse(stateStr);
-      if (!state.mint || !state.session_id) return false;
+      if (!state.mint || !state.mintSecretKey) return false;
       
         if (elLoadInfo) {
           elLoadInfo.style.display = "flex";
@@ -332,37 +332,39 @@
       }
 
       const mint = createData.mint;
-      const sessionId = createData.session_id;
-
+      const mintSecretKey = createData.mintSecretKey;
+      
       sessionStorage.setItem("tokenCreationState", JSON.stringify({
         step: "token_created",
         mint: mint,
-        session_id: sessionId,
+        mintSecretKey: mintSecretKey,
         tokenName: savedTokenName,
         tokenSymbol: savedTokenSymbol,
         ipfsLogo: savedIpfsLogo,
         description: description,
         decimals: decimals,
       }));
+      
 
       const revokeText = revokeCostDisplay > 0 ? ` Revokes (${revokeCostDisplay.toFixed(1)} SOL) will be charged separately.` : '';
       if (elLoadInfo) elLoadInfo.textContent = `Please sign the first transaction in your wallet. This creates the token and pays the service fee (${fixedChargeSol.toFixed(1)} SOL total).${revokeText}`;
-
+      
       const tx1Bytes = b64ToBytes(createData.transaction);
       const tx1 = solanaWeb3.Transaction.from(tx1Bytes);
-
-      // User signs only with their wallet — mint keypair is co-signed server-side via session_id
+      
       const signedTx1 = await provider.wallet.signTransaction(tx1);
-
+      const mintKeypair = solanaWeb3.Keypair.fromSecretKey(new Uint8Array(mintSecretKey));
+      signedTx1.partialSign(mintKeypair);
+      
       if (elLoadInfo) elLoadInfo.textContent = "Sending first transaction...";
-
+      
       let binary1 = '';
-      const signedTx1Bytes = signedTx1.serialize({ requireAllSignatures: false });
+      const signedTx1Bytes = signedTx1.serialize();
       for (let i = 0; i < signedTx1Bytes.length; i++) {
         binary1 += String.fromCharCode(signedTx1Bytes[i]);
       }
       const signedTx1Base64 = btoa(binary1);
-
+      
       let send1Resp;
       let send1Data;
       try {
@@ -371,7 +373,6 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             signed_transaction: signedTx1Base64,
-            session_id: sessionId,
           }),
         });
         
@@ -437,7 +438,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mint: mint,
-          session_id: sessionId,
+          mint_secret_key: mintSecretKey,
           payer: storedWallet,
           name: savedTokenName,
           symbol: savedTokenSymbol,
@@ -609,7 +610,16 @@
                 const errorMsg = sendRevokeData?.error || sendRevokeData?.detail || sendRevokeData?.message || error.message || "Unknown error";
                 
                 if (elLoadInfo) {
-                  elLoadInfo.textContent = `Error sending revoke transaction ${i + 1}: ${errorMsg}. Your token was created successfully, but revoke failed. Mint: ${short(mint)}`;
+                  elLoadInfo.innerHTML = `
+                    <div style="color: #ff4444;">
+                      <strong>Error sending revoke transaction ${i + 1}:</strong><br>
+                      ${errorMsg}<br><br>
+                      <small style="color: #888;">
+                        ⚠️ Your token was created successfully, but revoke failed.<br>
+                        You can retry revoke later using the same mint address: <code>${mint}</code>
+                      </small>
+                    </div>
+                  `;
                 }
                 return;
               }

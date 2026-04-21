@@ -1,11 +1,9 @@
 # main.py - point of enter
 import os
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from slowapi import Limiter
 from slowapi.middleware import SlowAPIMiddleware
@@ -15,26 +13,6 @@ from api.handlers import setup_exception_handlers
 from api.routes import router, setup_routes
 
 app = FastAPI()
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: https:; "
-            "connect-src 'self' https://*.helius-rpc.com https://api.devnet.solana.com https://api.mainnet-beta.solana.com https://gateway.pinata.cloud https://ipfs.io; "
-            "frame-ancestors 'none';"
-        )
-        return response
-
-app.add_middleware(SecurityHeadersMiddleware)
 
 limiter = Limiter(key_func=get_ipaddr)
 app.state.limiter = limiter
@@ -50,8 +28,6 @@ if cors_origins_env:
 else:
     # Дефолтные origins
     allow_origins = [
-        "https://tokenx.run",
-        "https://www.tokenx.run",
         "https://tokenstart.pro",
         "https://www.tokenstart.pro",
         "http://localhost:3000",
@@ -74,33 +50,32 @@ setup_routes(limiter)
 
 app.include_router(router)
 
+# УБРАТЬ эту строку - она перехватывает API запросы:
+# app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+
+# Вместо этого использовать SPA fallback:
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "soltoken-frontend")
 if os.path.isdir(FRONTEND_DIR):
     from fastapi.responses import FileResponse
-    from fastapi import HTTPException
-
-    # Named pages — each resolves to its own HTML file
-    _PAGE_MAP = {
-        "":        "index.html",
-        "app":     "app.html",
-        "terms":   "terms.html",
-        "privacy": "privacy.html",
-    }
-
+    from fastapi.staticfiles import StaticFiles
+    # Монтировать только для /static/ пути
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    
+    # SPA fallback для всех остальных путей (только GET)
     @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        # Strip trailing slash and look up in page map first
-        key = full_path.rstrip("/")
-        if key in _PAGE_MAP:
-            html_file = os.path.join(FRONTEND_DIR, _PAGE_MAP[key])
-            if os.path.isfile(html_file):
-                return FileResponse(html_file)
+    async def serve_spa(full_path: str):
+        # API роуты обрабатываются роутером выше
+        # Этот роут только для фронтенда
+        file_path = os.path.join(FRONTEND_DIR, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
 
-        # Serve any other static asset (css, js, img, fonts, …)
-        asset_path = os.path.join(FRONTEND_DIR, full_path)
-        if os.path.isfile(asset_path):
-            return FileResponse(asset_path)
+        # SPA fallback - вернуть index.html для всех не-API путей
+        index_path = os.path.join(FRONTEND_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
 
+        from fastapi import HTTPException
         raise HTTPException(status_code=404)
 
 if __name__ == "__main__":
